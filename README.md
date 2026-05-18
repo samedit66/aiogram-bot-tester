@@ -205,6 +205,16 @@ assert response.has_reply_keyboard_like([
 ])
 ```
 
+### Response.in_state(state)
+
+Returns `True` if after this response the state is `state`, `False` otherwise.
+
+Example:
+
+```python
+assert response.in_state(Form.name)
+```
+
 ---
 
 ## 🚀 Full example
@@ -436,6 +446,16 @@ assert response.has_reply_keyboard_like([
     ["1", "2", "3"],
     ["4", "5", "6"],
 ])
+```
+
+### Response.in_state(state)
+
+Возвращает `True`, если бот находится в заданном состоянии.
+
+Пример:
+
+```python
+assert response.in_state(Form.name)
 ```
 
 ---
