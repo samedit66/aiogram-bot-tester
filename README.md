@@ -58,6 +58,8 @@ Enable fast, deterministic, offline testing of Telegram bots without network, to
 ## Quick example
 
 ```python
+from aiogram_bot_tester import BotTester
+
 tester = BotTester.from_routers(router)
 
 response = await tester.send_message("/start")
@@ -301,6 +303,8 @@ uv add git+https://github.com/samedit66/aiogram-bot-tester.git
 ## Пример
 
 ```python
+from aiogram_bot_tester import BotTester
+
 tester = BotTester.from_routers(router)
 
 response = await tester.send_message("/start")
