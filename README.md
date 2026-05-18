@@ -16,19 +16,19 @@ Its goal is to make it easy to test bot logic deterministically by simulating Te
 With pip:
 
 ```bash
-pip install git+https://github.com/<YOUR_GITHUB_USERNAME>/aiogram_bot_tester.git
+pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 ```
 
 With poetry:
 
 ```bash
-poetry add git+https://github.com/<YOUR_GITHUB_USERNAME>/aiogram_bot_tester.git
+poetry add git+https://github.com/samedit66/aiogram-bot-tester.git
 ```
 
 With uv:
 
 ```bash
-uv add git+https://github.com/<YOUR_GITHUB_USERNAME>/aiogram_bot_tester.git
+uv add git+https://github.com/samedit66/aiogram-bot-tester.git
 ```
 
 ---
