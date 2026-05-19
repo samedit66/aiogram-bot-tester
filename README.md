@@ -12,63 +12,56 @@ A lightweight testing utility for **offline testing of aiogram bots without real
 
 Its goal is to make it easy to test bot logic deterministically by simulating Telegram updates, intercepting bot API calls, and exposing a clean assertion-friendly response layer.
 
----
+Легковесная библиотека для **оффлайн тестирования ботов, написанных на aiogram без использования интернета и Telegram API**.
 
-# English Version
+Цель данного пакета состоит в том, чтобы обеспечить проверку логики работы бота при помощи симуляции реальных Telegram-запросов с использованием чистых и удобных абстракций.
 
-## Installation
+## Installation / Установка
 
-With pip:
+Stable version / Стабильная версия:
+
+```bash
+pip install aiogram_bot_tester
+```
+
+Latest development version / Последняя разрабатываемая версия
 
 ```bash
 pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 ```
 
-With poetry:
-
-```bash
-poetry add git+https://github.com/samedit66/aiogram-bot-tester.git
-```
-
-With uv:
-
-```bash
-uv add git+https://github.com/samedit66/aiogram-bot-tester.git
-```
-
----
-
-## What is this?
-
-`aiogram_bot_tester` is a testing framework for bots built with `aiogram`.
-
-Instead of running a real Telegram bot, it:
-
-- simulates incoming Telegram updates (`Message`, `CallbackQuery`)
-- intercepts outgoing bot API calls (`send_message`, etc.)
-- captures state changes (`FSM`)
-- provides a clean assertion API
-
-#### Goal
-
-Enable fast, deterministic, offline testing of Telegram bots without network, tokens, or Telegram API dependency.
-
----
-
-## Quick example
+## Quick example / Пример
 
 ```python
+import aiogram
+from aiogram import filters, types
 from aiogram_bot_tester import BotTester
+import pytest
 
-tester = BotTester.from_routers(router)
+router = aiogram.Router()
 
-response = await tester.send_message("/start")
+@router.message(filters.CommandStart())
+async def cmd_start(message: types.Message) -> None:
+    await message.answer("Hello! What's your name?")
 
-assert response.text == "Hello"
-assert response.has_inline_button("Press")
+@pytest.mark.asyncio
+async def test_it() -> None:
+    # Make a tester
+    tester = BotTester.from_routers(router)
+
+    # If you have a `Bot` instance with a `Dispatcher`, use the following:
+    # tester = BotTester(bot=bot, dispatcher=dispatcher)
+
+    # Send a command
+    response = await tester.send_message("/start")
+
+    # Check that ``"Hello"`` is in response
+    assert response.contains("Hello")
 ```
 
 ---
+
+# English Version
 
 ## Core API
 
@@ -260,58 +253,6 @@ async def test_full_flow():
 ------------------------------------------------------------------------
 
 # Русская версия
-
-## Установка
-
-Через pip:
-
-```bash
-pip install git+https://github.com/samedit66/aiogram-bot-tester.git
-```
-
-Через poetry:
-
-```bash
-poetry add git+https://github.com/samedit66/aiogram-bot-tester.git
-```
-
-Через uv:
-
-```bash
-uv add git+https://github.com/samedit66/aiogram-bot-tester.git
-```
-
----
-
-## Что это?
-
-`aiogram_bot_tester` это тестировочный фреймворк для Telegram-ботов, написанных на `aiogram`.
-
-Он:
-
-- симулирует отправку различных Telegram-апдейтов (`Message`, `CallbackQuery`)
-- предоставляет знакомый интерфейс для работы с ботом (`send_message` и т.д.)
-- хранит информацию о состоянии (`FSM`)
-- предоставляет чистый и красивый API
-
-#### Цель
-
-Предоставить быстрое, детерменированное и оффлайн тестирование функционала Telegram-бота.
-
----
-
-## Пример
-
-```python
-from aiogram_bot_tester import BotTester
-
-tester = BotTester.from_routers(router)
-
-response = await tester.send_message("/start")
-
-assert response.text == "Привет"
-assert response.has_inline_button("Нажми меня!")
-```
 
 ---
 
