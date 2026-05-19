@@ -6,7 +6,7 @@ import datetime as dt
 import re
 import typing as t
 import unittest.mock as mock
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import aiogram as aio
 import aiogram.fsm.state as fsm_state
@@ -174,6 +174,22 @@ class BotTester:
         )
 
         return await self._build_response()
+
+    async def send_command(
+        self,
+        command: str,
+        *command_args: Any,
+        prefix: str = "/",
+    ) -> Response:
+        """
+        Helper for sending commands more easily.
+
+        Instead of `tester.send_message(f"/sum {a} {b}")`,
+        you can simply write `tester.send_command("sum", a, b)`.
+        """
+        return await self.send_message(
+            text=" ".join([f"{prefix}{command}", *[str(arg) for arg in command_args]]),
+        )
 
     async def click_reply_button(
         self,

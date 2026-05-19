@@ -1,5 +1,6 @@
 import pytest
 from aiogram import F, Router
+from aiogram.filters.command import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -48,6 +49,28 @@ async def test_send_message_without_response():
     response = await tester.send_message("/start")
 
     assert response.text is None
+
+
+@pytest.mark.asyncio
+async def test_send_command():
+    router = Router()
+
+    @router.message(Command("sum"))
+    async def cmd_sum(message: Message, command: CommandObject):
+        if command.args is None:
+            await message.answer("/sum expects two numbers")
+            return
+
+        a, b = map(int, command.args.split())
+        await message.answer(str(a + b))
+
+    tester = BotTester.from_routers(router)
+
+    a = 1
+    b = 2
+    result = 3
+    response = await tester.send_command("sum", a, b)
+    assert response.text == str(result)
 
 
 # ============================================================

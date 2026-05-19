@@ -82,6 +82,22 @@ response = await tester.send_message("/start")
 assert response.text == "Hello"
 ```
 
+### send_command(command, *command_args, prefix="/")
+
+Helper to make sending commands more easily.
+
+Instead of
+
+```python
+await tester.send_message(f"/sum {a} {b}")
+```
+
+you can simply write 
+
+```python
+await tester.send_command("sum", a, b)
+```
+
 ### click_reply_button(text, **kwargs)
 
 Simulates clicking a reply button. Actually, it's just another way of calling `send_message`. Exists just to clarify intention.
@@ -273,6 +289,22 @@ tester = BotTester.from_routers(router1, router2, router3)
 ```python
 response = await tester.send_message("/start")
 assert response.text == "Привет"
+```
+
+### send_command(command, *command_args, prefix="/")
+
+Вспомогательная функция для более легкой отправки команд.
+
+Вместо
+
+```python
+await tester.send_message(f"/sum {a} {b}")
+```
+
+можно просто писать
+
+```python
+await tester.send_command("sum", a, b)
 ```
 
 ### click_reply_button(text, **kwargs)
