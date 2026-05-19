@@ -14,21 +14,6 @@ from aiogram.types import (
 from aiogram_bot_tester import BotTester
 
 # ============================================================
-# FIXTURES
-# ============================================================
-
-
-@pytest.fixture
-def router():
-    return Router()
-
-
-@pytest.fixture
-def tester(router):
-    return BotTester.from_routers(router)
-
-
-# ============================================================
 # BASIC MESSAGE FLOW
 # ============================================================
 
