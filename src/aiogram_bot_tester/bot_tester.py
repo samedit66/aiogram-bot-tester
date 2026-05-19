@@ -1,59 +1,73 @@
 from __future__ import annotations
 
+import dataclasses as dc
+import datetime as dt
 import re
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+import typing as t
+import unittest.mock as mock
+from typing import ClassVar
 
-from aiogram import Bot, Dispatcher, Router
-from aiogram.fsm.state import State
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.methods import SendMessage
-from aiogram.types import (
-    CallbackQuery,
-    Chat,
-    InlineKeyboardMarkup,
-    Message,
-    ReplyKeyboardMarkup,
-    Update,
-    User,
-)
+import aiogram as aio
+import aiogram.fsm.state as fsm_state
+import aiogram.fsm.storage.memory as fsm_memory
+import aiogram.methods as methods
+import aiogram.types as types
 
 
-@dataclass(slots=True)
+@dc.dataclass(frozen=True, slots=True)
 class InlineButton:
+    """Snapshot of an inline keyboard button."""
+
     text: str
+    """Visible label on the button."""
+
     callback_data: str | None
+    """Callback payload attached to the button, or ``None`` if absent."""
 
 
-@dataclass(slots=True)
+@dc.dataclass(frozen=True, slots=True)
 class CapturedMessage:
+    """Snapshot of a message sent by the bot."""
+
     text: str | None
+    """Message text, or ``None`` when the bot sent no text."""
+
     inline_keyboard: list[list[InlineButton]]
+    """Inline keyboard layout captured from the message."""
+
     reply_keyboard: list[list[str]]
+    """Reply keyboard layout captured from the message."""
 
 
-@dataclass(slots=True)
+@dc.dataclass(frozen=True, slots=True)
 class Response:
+    """Result of a synthetic interaction with the bot."""
+
     text: str | None
-    state: State | None
+    """Bot text response, or ``None`` when the bot sent no text."""
+
+    state: fsm_state.State | None
+    """FSM state after handling the update, or ``None`` when inactive."""
+
     message: CapturedMessage | None
+    """
+    Captured outgoing message, if any.
+
+    This includes the message text and any inline or reply keyboards.
+    """
 
     def contains(self, text: str) -> bool:
-        if not self.message:
-            return False
+        """Return ``True`` when the response text contains ``text``."""
+        return self.text is not None and text in self.text
 
-        return text in self.text
-
-    def matches(self, regex: str | re.Pattern) -> bool:
-        if not self.message:
-            return False
-
-        return re.compile(regex).match(self.text)
+    def matches(self, regex: str | re.Pattern[str]) -> bool:
+        """Return ``True`` when the response text matches ``regex``."""
+        pattern = regex if isinstance(regex, re.Pattern) else re.compile(regex)
+        return bool(pattern.match(self.text or ""))
 
     def has_inline_button(self, label: str) -> bool:
-        if not self.message:
+        """Return ``True`` when an inline button with ``label`` exists."""
+        if self.message is None:
             return False
 
         return any(
@@ -63,7 +77,8 @@ class Response:
         )
 
     def has_reply_button(self, label: str) -> bool:
-        if not self.message:
+        """Return ``True`` when a reply button with ``label`` exists."""
+        if self.message is None:
             return False
 
         return any(label in row for row in self.message.reply_keyboard)
@@ -72,7 +87,8 @@ class Response:
         self,
         keyboard: list[list[str]],
     ) -> bool:
-        if not self.message:
+        """Return ``True`` when the inline keyboard matches ``keyboard``."""
+        if self.message is None:
             return False
 
         return [
@@ -83,47 +99,52 @@ class Response:
         self,
         keyboard: list[list[str]],
     ) -> bool:
-        if not self.message:
+        """Return ``True`` when the reply keyboard matches ``keyboard``."""
+        if self.message is None:
             return False
 
         return self.message.reply_keyboard == keyboard
 
-    def in_state(self, state: State) -> bool:
-        if not self.message:
-            return False
-
+    def in_state(self, state: fsm_state.State) -> bool:
+        """Return ``True`` when the response FSM state equals ``state``."""
         return self.state == state
 
 
+@dc.dataclass(slots=True)
 class BotTester:
-    CHAT_ID = 1
-    USER_ID = 1
+    """Helper for driving a bot through synthetic updates in tests."""
 
-    def __init__(
-        self,
-        bot: Bot,
-        dispatcher: Dispatcher,
-    ):
-        self.bot = bot
-        self.dispatcher = dispatcher
+    bot: aio.Bot
+    """Attached bot instance."""
 
-        self.messages: list[CapturedMessage] = []
+    dispatcher: aio.Dispatcher
+    """Attached dispatcher instance."""
 
-        self.bot.session.make_request = AsyncMock(
+    messages: list[CapturedMessage] = dc.field(default_factory=list)
+    """Captured outgoing messages in send order."""
+
+    CHAT_ID: ClassVar[int] = 1
+    """Synthetic chat identifier used for generated updates."""
+
+    USER_ID: ClassVar[int] = 1
+    """Synthetic user identifier used for generated updates."""
+
+    def __post_init__(self) -> None:
+        """Attach a mocked transport layer used for capturing bot responses."""
+        self.bot.session.make_request = mock.AsyncMock(
             side_effect=self._capture_request,
         )
 
     @classmethod
     def from_routers(
         cls,
-        *routers: Router,
+        *routers: aio.Router,
+        token: str = "42:TEST",
     ) -> BotTester:
-        bot = Bot(token="42:TEST")
+        """Create a tester instance with the provided routers registered."""
+        bot = aio.Bot(token=token)
 
-        dispatcher = Dispatcher(
-            storage=MemoryStorage(),
-        )
-
+        dispatcher = aio.Dispatcher(storage=fsm_memory.MemoryStorage())
         dispatcher.include_routers(*routers)
 
         return cls(bot, dispatcher)
@@ -131,14 +152,15 @@ class BotTester:
     async def send_message(
         self,
         text: str,
-        **message_kwargs: Any,
+        **message_kwargs: t.Any,
     ) -> Response:
+        """Send a synthetic message and return the resulting response snapshot."""
         message = self._create_message(
             text=text,
             **message_kwargs,
         )
 
-        update = Update(
+        update = types.Update(
             update_id=1,
             message=message,
         )
@@ -153,8 +175,9 @@ class BotTester:
     async def click_reply_button(
         self,
         text: str,
-        **message_kwargs: Any,
+        **message_kwargs: t.Any,
     ) -> Response:
+        """Simulate a reply-keyboard click by sending the button text."""
         return await self.send_message(
             text=text,
             **message_kwargs,
@@ -164,13 +187,14 @@ class BotTester:
         self,
         label: str,
     ) -> Response:
+        """Simulate clicking an inline button with the given label."""
         callback_data = self._find_callback_data(label)
 
         telegram_message = self._create_message(
             text=self.messages[-1].text or "",
         )
 
-        callback_query = CallbackQuery(
+        callback_query = types.CallbackQuery(
             id="test-callback-query",
             from_user=telegram_message.from_user,
             chat_instance="test-chat-instance",
@@ -179,7 +203,7 @@ class BotTester:
             bot=self.bot,
         )
 
-        update = Update(
+        update = types.Update(
             update_id=1,
             callback_query=callback_query,
         )
@@ -195,6 +219,7 @@ class BotTester:
         self,
         label: str,
     ) -> str:
+        """Return callback data associated with the inline button label."""
         if not self.messages:
             raise ValueError("No messages available")
 
@@ -213,16 +238,17 @@ class BotTester:
     def _create_message(
         self,
         text: str,
-        **message_kwargs: Any,
-    ) -> Message:
-        return Message(
+        **message_kwargs: t.Any,
+    ) -> types.Message:
+        """Create a synthetic Telegram message object."""
+        return types.Message(
             message_id=1,
-            date=datetime.now(),
-            chat=Chat(
+            date=dt.datetime.now(),
+            chat=types.Chat(
                 id=self.CHAT_ID,
                 type="private",
             ),
-            from_user=User(
+            from_user=types.User(
                 id=self.USER_ID,
                 is_bot=False,
                 first_name="Test",
@@ -234,11 +260,12 @@ class BotTester:
 
     async def _capture_request(
         self,
-        bot: Bot,
-        method: Any,
+        bot: aio.Bot,
+        method: t.Any,
         timeout: int | None = None,
-    ) -> MagicMock:
-        if isinstance(method, SendMessage):
+    ) -> mock.MagicMock:
+        """Capture outgoing bot requests for later inspection."""
+        if isinstance(method, methods.SendMessage):
             self.messages.append(
                 CapturedMessage(
                     text=method.text,
@@ -251,13 +278,14 @@ class BotTester:
                 )
             )
 
-        return MagicMock()
+        return mock.MagicMock()
 
     def _extract_inline_keyboard(
         self,
-        markup: Any,
+        markup: t.Any,
     ) -> list[list[InlineButton]]:
-        if not isinstance(markup, InlineKeyboardMarkup):
+        """Extract inline keyboard data from Telegram markup."""
+        if not isinstance(markup, types.InlineKeyboardMarkup):
             return []
 
         return [
@@ -273,16 +301,20 @@ class BotTester:
 
     def _extract_reply_keyboard(
         self,
-        markup: Any,
+        markup: t.Any,
     ) -> list[list[str]]:
-        if not isinstance(markup, ReplyKeyboardMarkup):
+        """Extract reply keyboard data from Telegram markup."""
+        if not isinstance(markup, types.ReplyKeyboardMarkup):
             return []
 
         return [[button.text for button in row] for row in markup.keyboard]
 
     async def _build_response(self) -> Response:
+        """Build a response snapshot from captured bot state."""
         state = await self.dispatcher.fsm.get_context(
-            bot=self.bot, chat_id=self.CHAT_ID, user_id=self.USER_ID
+            bot=self.bot,
+            chat_id=self.CHAT_ID,
+            user_id=self.USER_ID,
         ).get_state()
 
         message = self.messages[-1] if self.messages else None
