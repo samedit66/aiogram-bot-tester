@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import dataclasses as dc
 import datetime as dt
 import re
@@ -105,7 +106,7 @@ class Response:
 
         return self.message.reply_keyboard == keyboard
 
-    def in_state(self, state: fsm_state.State) -> bool:
+    def in_state(self, state: fsm_state.State | None) -> bool:
         """Return ``True`` when the response FSM state equals ``state``."""
         return self.state == state
 
@@ -145,7 +146,9 @@ class BotTester:
         bot = aio.Bot(token=token)
 
         dispatcher = aio.Dispatcher(storage=fsm_memory.MemoryStorage())
-        dispatcher.include_routers(*routers)
+        # We perform deepcopy because of the fact, that a single router cannot
+        # be attached to multiple dispatchers
+        dispatcher.include_routers(*[copy.deepcopy(r) for r in routers])
 
         return cls(bot, dispatcher)
 
