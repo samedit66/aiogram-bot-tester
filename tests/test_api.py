@@ -32,8 +32,8 @@ async def test_send_message_returns_response():
     response = await tester.send_message("/start")
 
     assert response.text == "Hello"
-    assert response.contains("ll")
-    assert response.matches("[hH]ello")
+    assert response.contains("ll", "ello")
+    assert response.matches("[hH]ello", "^H")
 
 
 @pytest.mark.asyncio

@@ -57,14 +57,17 @@ class Response:
     This includes the message text and any inline or reply keyboards.
     """
 
-    def contains(self, text: str) -> bool:
-        """Return ``True`` when the response text contains ``text``."""
-        return self.text is not None and text in self.text
+    def contains(self, *texts: str) -> bool:
+        """Return ``True`` when the response text contains any of ``texts``."""
+        return self.text is not None and any(text in self.text for text in texts)
 
-    def matches(self, regex: str | re.Pattern[str]) -> bool:
-        """Return ``True`` when the response text matches ``regex``."""
-        pattern = regex if isinstance(regex, re.Pattern) else re.compile(regex)
-        return bool(pattern.match(self.text or ""))
+    def matches(self, *regexes: str | re.Pattern[str]) -> bool:
+        """Return ``True`` when the response text matches any of ``regexes``."""
+        patterns = [
+            regex if isinstance(regex, re.Pattern) else re.compile(regex)
+            for regex in regexes
+        ]
+        return any(pattern.match(self.text or "") for pattern in patterns)
 
     def has_inline_button(self, label: str) -> bool:
         """Return ``True`` when an inline button with ``label`` exists."""
