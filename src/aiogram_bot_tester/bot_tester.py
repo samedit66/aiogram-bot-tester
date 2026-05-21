@@ -127,11 +127,25 @@ class BotTester:
     messages: list[CapturedMessage] = dc.field(default_factory=list)
     """Captured outgoing messages in send order."""
 
-    CHAT_ID: ClassVar[int] = 1
+    chat_id: int = 1
     """Synthetic chat identifier used for generated updates."""
 
-    USER_ID: ClassVar[int] = 1
+    user_id: int = 1
     """Synthetic user identifier used for generated updates."""
+
+    message_id: int = 1
+    """
+    Synthetic message identifier used for generated updates.
+
+    Gets increased by one each time a fake message is created.
+    """
+
+    update_id: int = 1
+    """
+    Synthetic update identifier used for generated updates.
+
+    Gets increased by one each time a fake message is created.
+    """
 
     def __post_init__(self) -> None:
         """Attach a mocked transport layer used for capturing bot responses."""
@@ -144,6 +158,7 @@ class BotTester:
         cls,
         *routers: aio.Router,
         token: str = "42:TEST",
+        **kwargs: Any,
     ) -> BotTester:
         """Create a tester instance with the provided routers registered."""
         bot = aio.Bot(token=token)
@@ -153,7 +168,7 @@ class BotTester:
         # be attached to multiple dispatchers
         dispatcher.include_routers(*[copy.deepcopy(r) for r in routers])
 
-        return cls(bot, dispatcher)
+        return cls(bot, dispatcher, **kwargs)
 
     async def send_message(
         self,
@@ -226,9 +241,10 @@ class BotTester:
         )
 
         update = types.Update(
-            update_id=1,
+            update_id=self.update_id,
             callback_query=callback_query,
         )
+        self.update_id += 1
 
         await self.dispatcher.feed_update(
             self.bot,
@@ -263,15 +279,15 @@ class BotTester:
         **message_kwargs: t.Any,
     ) -> types.Message:
         """Create a synthetic Telegram message object."""
-        return types.Message(
-            message_id=1,
+        message = types.Message(
+            message_id=self.message_id,
             date=dt.datetime.now(),
             chat=types.Chat(
-                id=self.CHAT_ID,
+                id=self.chat_id,
                 type="private",
             ),
             from_user=types.User(
-                id=self.USER_ID,
+                id=self.user_id,
                 is_bot=False,
                 first_name="Test",
             ),
@@ -279,6 +295,8 @@ class BotTester:
             bot=self.bot,
             **message_kwargs,
         )
+        self.message_id += 1
+        return message
 
     async def _capture_request(
         self,
@@ -335,8 +353,8 @@ class BotTester:
         """Build a response snapshot from captured bot state."""
         state = await self.dispatcher.fsm.get_context(
             bot=self.bot,
-            chat_id=self.CHAT_ID,
-            user_id=self.USER_ID,
+            chat_id=self.chat_id,
+            user_id=self.user_id,
         ).get_state()
 
         message = self.messages[-1] if self.messages else None
