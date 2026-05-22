@@ -164,8 +164,24 @@ class BotTester:
 
         dispatcher = aio.Dispatcher(storage=fsm_memory.MemoryStorage())
         # We perform deepcopy because of the fact, that a single router cannot
-        # be attached to multiple dispatchers
-        dispatcher.include_routers(*[copy.deepcopy(r) for r in routers])
+        # be attached to multiple dispatchers. This issues arises when a tester is
+        # used in a fixture:
+        # ```python
+        # @pytest.fixture
+        # def tester() -> BotTester:
+        #    return BotTester.from_routers(router)
+        #
+        # @pytest.mark.asyncio
+        # async def test_full_registration(tester: BotTester) -> None:
+        #     ...
+        #
+        # @pytest.mark.asyncio
+        # async def test_fallback(tester: BotTester) -> None:
+        #     ...
+        # ```
+        # Without copying we get an error, because fixture gets called 2 times,
+        # but in the first time the router was already attached
+        dispatcher.include_routers(*[copy.deepcopy(router) for router in routers])
 
         return cls(bot, dispatcher, **kwargs)
 
