@@ -4,9 +4,8 @@ import copy
 import dataclasses as dc
 import datetime as dt
 import re
-import typing as t
 import unittest.mock as mock
-from typing import Any, ClassVar
+from typing import Any
 
 import aiogram as aio
 import aiogram.fsm.state as fsm_state
@@ -173,7 +172,7 @@ class BotTester:
     async def send_message(
         self,
         text: str,
-        **message_kwargs: t.Any,
+        **message_kwargs: Any,
     ) -> Response:
         """Send a synthetic message and return the resulting response snapshot."""
         message = self._create_message(
@@ -212,7 +211,7 @@ class BotTester:
     async def click_reply_button(
         self,
         text: str,
-        **message_kwargs: t.Any,
+        **message_kwargs: Any,
     ) -> Response:
         """Simulate a reply-keyboard click by sending the button text."""
         return await self.send_message(
@@ -276,7 +275,7 @@ class BotTester:
     def _create_message(
         self,
         text: str,
-        **message_kwargs: t.Any,
+        **message_kwargs: Any,
     ) -> types.Message:
         """Create a synthetic Telegram message object."""
         message = types.Message(
@@ -301,7 +300,7 @@ class BotTester:
     async def _capture_request(
         self,
         bot: aio.Bot,
-        method: t.Any,
+        method: Any,
         timeout: int | None = None,
     ) -> mock.MagicMock:
         """Capture outgoing bot requests for later inspection."""
@@ -322,7 +321,7 @@ class BotTester:
 
     def _extract_inline_keyboard(
         self,
-        markup: t.Any,
+        markup: Any,
     ) -> list[list[InlineButton]]:
         """Extract inline keyboard data from Telegram markup."""
         if not isinstance(markup, types.InlineKeyboardMarkup):
@@ -341,7 +340,7 @@ class BotTester:
 
     def _extract_reply_keyboard(
         self,
-        markup: t.Any,
+        markup: Any,
     ) -> list[list[str]]:
         """Extract reply keyboard data from Telegram markup."""
         if not isinstance(markup, types.ReplyKeyboardMarkup):
