@@ -191,19 +191,14 @@ class BotTester:
         **message_kwargs: Any,
     ) -> Response:
         """Send a synthetic message and return the resulting response snapshot."""
-        message = self._create_message(
-            text=text,
-            **message_kwargs,
-        )
-
-        update = types.Update(
-            update_id=1,
-            message=message,
-        )
-
         await self.dispatcher.feed_update(
-            self.bot,
-            update,
+            bot=self.bot,
+            update=self._create_update(
+                message=self._create_message(
+                    text=text,
+                    **message_kwargs,
+                )
+            ),
         )
 
         return await self._build_response()
@@ -242,24 +237,20 @@ class BotTester:
         """Simulate clicking an inline button with the given label."""
         callback_data = self._find_callback_data(label)
 
-        telegram_message = self._create_message(
+        message = self._create_message(
             text=self.messages[-1].text or "",
         )
 
-        callback_query = types.CallbackQuery(
-            id="test-callback-query",
-            from_user=telegram_message.from_user,
-            chat_instance="test-chat-instance",
-            data=callback_data,
-            message=telegram_message,
-            bot=self.bot,
+        update = self._create_update(
+            callback_query=types.CallbackQuery(
+                id="test-callback-query",
+                from_user=message.from_user,
+                chat_instance="test-chat-instance",
+                data=callback_data,
+                message=message,
+                bot=self.bot,
+            )
         )
-
-        update = types.Update(
-            update_id=self.update_id,
-            callback_query=callback_query,
-        )
-        self.update_id += 1
 
         await self.dispatcher.feed_update(
             self.bot,
@@ -287,6 +278,15 @@ class BotTester:
                     return button.callback_data
 
         raise ValueError(f"Inline button '{label}' not found")
+
+    def _create_update(self, **update_kwargs: Any) -> types.Update:
+        """Create a synthetic Telegram update object."""
+        update = types.Update(
+            update_id=self.update_id,
+            **update_kwargs,
+        )
+        self.update_id += 1
+        return update
 
     def _create_message(
         self,
