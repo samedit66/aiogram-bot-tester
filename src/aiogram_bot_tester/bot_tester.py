@@ -234,7 +234,11 @@ class BotTester:
         self,
         label: str,
     ) -> Response:
-        """Simulate clicking an inline button with the given label."""
+        """
+        Simulate clicking an inline button with the given label.
+
+        If multiple inline buttons have the same label, the first one found is chosen.
+        """
         callback_data = self._find_callback_data(label)
 
         message = self._create_message(
