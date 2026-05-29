@@ -146,6 +146,11 @@ class BotTester:
     Gets increased by one each time a fake message is created.
     """
 
+    command_prefix: str = "/"
+    """
+    Prefix used for commands.
+    """
+
     def __post_init__(self) -> None:
         """Attach a mocked transport layer used for capturing bot responses."""
         self.bot.session.make_request = mock.AsyncMock(
@@ -207,7 +212,7 @@ class BotTester:
         self,
         command: str,
         *command_args: Any,
-        prefix: str = "/",
+        prefix: str | None = None,
     ) -> Response:
         """
         Helper for sending commands more easily.
@@ -216,7 +221,12 @@ class BotTester:
         you can simply write `tester.send_command("sum", a, b)`.
         """
         return await self.send_message(
-            text=" ".join([f"{prefix}{command}", *[str(arg) for arg in command_args]]),
+            text=" ".join(
+                [
+                    f"{prefix or self.command_prefix}{command}",
+                    *[str(arg) for arg in command_args],
+                ]
+            ),
         )
 
     async def click_reply_button(
