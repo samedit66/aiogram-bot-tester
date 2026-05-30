@@ -82,6 +82,7 @@ async def test_full_registration(tester: BotTester) -> None:
     response = await tester.send_message("Bob")
     assert response.contains("Hi, Bob! I like your name. What about your password?")
     assert response.in_state(Registration.password)
+    assert response.storage_has(name="Bob")
 
     response = await tester.send_message("qwerty123")
     assert response.contains("Good, a strong one! Thank you!")

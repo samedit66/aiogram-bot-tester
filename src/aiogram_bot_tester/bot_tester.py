@@ -10,8 +10,7 @@ from typing import Any
 import aiogram as aio
 import aiogram.fsm.state as fsm_state
 import aiogram.fsm.storage.memory as fsm_memory
-import aiogram.methods as methods
-import aiogram.types as types
+from aiogram import methods, types
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -48,6 +47,9 @@ class Response:
 
     state: fsm_state.State | None
     """FSM state after handling the update, or ``None`` when inactive."""
+
+    storage: dict[str, Any]
+    """FSM collected data."""
 
     message: CapturedMessage | None
     """
@@ -111,6 +113,12 @@ class Response:
     def in_state(self, state: fsm_state.State | None) -> bool:
         """Return ``True`` when the response FSM state equals ``state``."""
         return self.state == state
+
+    def storage_has(self, **kwargs: Any) -> bool:
+        """Return ``True`` when all of the given ``kwargs`` are present in ``storage``."""
+        return all(
+            k in self.storage and self.storage[k] == v for k, v in kwargs.items()
+        )
 
 
 @dc.dataclass(slots=True)
@@ -380,16 +388,19 @@ class BotTester:
 
     async def _build_response(self) -> Response:
         """Build a response snapshot from captured bot state."""
-        state = await self.dispatcher.fsm.get_context(
+        context = self.dispatcher.fsm.get_context(
             bot=self.bot,
             chat_id=self.chat_id,
             user_id=self.user_id,
-        ).get_state()
+        )
+        state = await context.get_state()
+        storage = await context.get_data()
 
         message = self.messages[-1] if self.messages else None
 
         return Response(
             text=message.text if message else None,
             state=state,
+            storage=storage,
             message=message,
         )
