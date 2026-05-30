@@ -199,7 +199,7 @@ assert response.in_state(Form.name)
 
 ### storage_has(**kwargs)
 
-Return `True` when all of the given `kwargs` are present in `storage`.
+Returns `True` when all of the given `kwargs` are present in `storage`.
 
 Example:
 
