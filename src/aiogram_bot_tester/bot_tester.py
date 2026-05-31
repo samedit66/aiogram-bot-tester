@@ -221,7 +221,7 @@ class BotTester:
     async def send_command(
         self,
         command: str,
-        *command_args: Any,
+        *args: Any,
         prefix: str | None = None,
     ) -> Response:
         """
@@ -234,7 +234,7 @@ class BotTester:
             text=" ".join(
                 [
                     f"{prefix or self.command_prefix}{command}",
-                    *[str(arg) for arg in command_args],
+                    *[str(arg) for arg in args],
                 ]
             ),
         )
