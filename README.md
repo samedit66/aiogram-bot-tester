@@ -59,6 +59,33 @@ async def test_it() -> None:
     assert response.contains("Hello")
 ```
 
+## Convo API
+
+> [!IMPORTANT]
+> This API is under heavy discussion and may change a lot.
+> Currently, it's not included in the latest `0.4.0` version.
+
+```python
+from aiogram_bot_tester import convo
+
+@pytest.mark.asyncio
+async def test_full_registration_with_convo(tester: BotTester) -> None:
+    await tester.verify(
+        convo.Convo()
+        .command("start")
+        .see("Hello! What's your name?")
+        .in_state(Registration.name)
+        .say("Bob")
+        .see("Hi, Bob! I like your name. What about your password?")
+        .data_has(name="Bob")
+        .in_state(Registration.password)
+        .say("qwerty123")
+        .see("Good, a strong one! Thank you!")
+        .in_state(None)
+    )
+```
+
+
 ---
 
 # English Version
