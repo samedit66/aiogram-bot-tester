@@ -204,6 +204,8 @@ class BotTester:
         **message_kwargs: Any,
     ) -> Response:
         """Send a synthetic message and return the resulting response snapshot."""
+        before = len(self.messages)
+
         await self.dispatcher.feed_update(
             bot=self.bot,
             update=self._create_update(
@@ -214,7 +216,7 @@ class BotTester:
             ),
         )
 
-        return await self._build_response()
+        return await self._build_response(before)
 
     async def send_command(
         self,
@@ -386,7 +388,7 @@ class BotTester:
 
         return [[button.text for button in row] for row in markup.keyboard]
 
-    async def _build_response(self) -> Response:
+    async def _build_response(self, before: int) -> Response:
         """Build a response snapshot from captured bot state."""
         context = self.dispatcher.fsm.get_context(
             bot=self.bot,
@@ -396,7 +398,11 @@ class BotTester:
         state = await context.get_state()
         storage = await context.get_data()
 
-        message = self.messages[-1] if self.messages else None
+        # No handler was executed
+        if before == len(self.messages):
+            message = None
+        else:
+            message = self.messages[-1] if self.messages else None
 
         return Response(
             text=message.text if message else None,
