@@ -12,6 +12,8 @@ import aiogram.fsm.state as fsm_state
 import aiogram.fsm.storage.memory as fsm_memory
 from aiogram import methods, types
 
+from aiogram_bot_tester import convo as C
+
 
 @dc.dataclass(frozen=True, slots=True)
 class InlineButton:
@@ -276,12 +278,67 @@ class BotTester:
             )
         )
 
+        before = len(self.messages)
+
         await self.dispatcher.feed_update(
             self.bot,
             update,
         )
 
-        return await self._build_response()
+        return await self._build_response(before)
+
+    async def verify(self, convo: C.Convo) -> None:
+        """
+        Verifies that the given conversation path is correct.
+        """
+        responses: list[Response] = []
+
+        for action in convo.actions:
+            match action:
+                case C.Command(command=command, args=args, prefix=prefix):
+                    response = await self.send_command(command, *args, prefix=prefix)
+                    responses.append(response)
+                case C.Say(text=text):
+                    response = await self.send_message(text)
+                    responses.append(response)
+                case C.Tap(button=button) if responses:
+                    last = responses[-1]
+                    if last.has_reply_button(button):
+                        response = await self.click_reply_button(button)
+                        responses.append(response)
+                    elif last.has_inline_button(button):
+                        response = await self.click_inline_button(button)
+                        responses.append(response)
+                    else:
+                        raise AssertionError(f"No button named: {repr(button)}\n")
+                case C.See(texts=texts) if responses:
+                    last = responses[-1]
+                    if not last.contains(*texts):
+                        raise AssertionError(
+                            f"Response does not contain: {repr(texts)}"
+                        )
+                case C.SeeRegex(regexes=regexes) if responses:
+                    last = responses[-1]
+                    if not last.matches(*regexes):
+                        raise AssertionError(
+                            f"Response does not match: {repr(regexes)}"
+                        )
+                case C.SeeButton(button=button) if responses:
+                    last = responses[-1]
+                    if not (
+                        last.has_reply_button(button) or last.has_inline_button(button)
+                    ):
+                        raise AssertionError(f"No button named: {repr(button)}")
+                case C.InState(state=state) if responses:
+                    last = responses[-1]
+                    if not last.in_state(state):
+                        raise AssertionError(f"Current state is not: {state}")
+                case C.DataHas(kwargs=kwargs) if responses:
+                    last = responses[-1]
+                    if not last.storage_has(**kwargs):
+                        raise AssertionError(f"Data does not contain: {repr(kwargs)}")
+                case _:
+                    raise AssertionError("No response found")
 
     def _find_callback_data(
         self,

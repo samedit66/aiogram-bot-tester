@@ -334,3 +334,23 @@ async def test_inline_button_without_callback_data_raises():
 
     with pytest.raises(ValueError):
         await tester.click_inline_button("Broken")
+
+
+# ============================================================
+# BOT IGNORES OR NO APPROPRIATE HANDLER FOUND
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_no_suitable_handler():
+    router = Router()
+
+    @router.message(Command("start"))
+    async def cmd_start(message: Message) -> None:
+        await message.answer("Hi!")
+
+    tester = BotTester.from_routers(router)
+
+    response = await tester.send_message("/bye")
+
+    assert response.text is None and response.message is None

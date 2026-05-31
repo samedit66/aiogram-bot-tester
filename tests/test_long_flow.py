@@ -6,7 +6,7 @@ import pytest
 from aiogram import filters, types
 from aiogram.fsm import context, state
 
-from aiogram_bot_tester import BotTester
+from aiogram_bot_tester import BotTester, convo
 
 # ============================================================
 # SETUP THE BOT TO TEST.
@@ -93,3 +93,27 @@ async def test_full_registration(tester: BotTester) -> None:
 async def test_fallback(tester: BotTester) -> None:
     response = await tester.send_message("/hehe")
     assert response.contains("I don't quite understand you...")
+
+
+@pytest.mark.asyncio
+async def test_full_registration_with_convo(tester: BotTester) -> None:
+    await tester.verify(
+        convo.Convo()
+        .command("start")
+        .see("Hello! What's your name?")
+        .in_state(Registration.name)
+        .say("Bob")
+        .see("Hi, Bob! I like your name. What about your password?")
+        .data_has(name="Bob")
+        .in_state(Registration.password)
+        .say("qwerty123")
+        .see("Good, a strong one! Thank you!")
+        .in_state(None)
+    )
+
+
+@pytest.mark.asyncio
+async def test_fallback_with_convo(tester: BotTester) -> None:
+    await tester.verify(
+        convo.Convo().command("hehe").see("I don't quite understand you...")
+    )
