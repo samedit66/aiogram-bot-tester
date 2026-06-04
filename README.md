@@ -4,6 +4,7 @@
 ![telegram](https://img.shields.io/badge/telegram-bot-blue?logo=telegram)
 ![status](https://img.shields.io/badge/status-WIP-orange)
 ![python](https://img.shields.io/badge/python-3.10+-blue?logo=python)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/aiogram-bot-tester?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads)](https://pepy.tech/projects/aiogram-bot-tester)
 
 **Navigation / Навигация** - [English version](#english-version) -
 [Русская версия](#русская-версия)
