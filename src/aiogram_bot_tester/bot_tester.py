@@ -4,15 +4,10 @@ import asyncio
 import copy
 import dataclasses as dc
 import datetime as dt
-import functools
 import itertools
 import re
 import unittest.mock as mock
-from abc import ABC
-from multiprocessing import Value
-from sre_compile import dis
-from time import time
-from typing import Any, AsyncGenerator, Callable, Generic, NoReturn, TypeVar
+from typing import Any
 
 import aiogram as aio
 import aiogram.fsm.context as fsm_context
@@ -20,12 +15,7 @@ import aiogram.fsm.state as fsm_state
 import aiogram.fsm.storage.memory as fsm_memory
 import aiogram.methods as aio_methods
 import aiogram.types as aio_types
-from _pytest._py.error import R
-from aiogram import methods, types
-from aiogram.client import session
-from aiogram.client.bot import Bot
-from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.client.session.base import BaseSession
+from aiogram.client.session import aiohttp
 
 
 @dc.dataclass(frozen=True, slots=True)
@@ -258,9 +248,9 @@ class BotConversation:
         self.message_ids = IdGenerator()
         self.update_ids = IdGenerator()
 
-        mocked_session = AiohttpSession()
+        mocked_session = aiohttp.AiohttpSession()
         mocked_session.make_request = mock.AsyncMock(side_effect=self._capture_request)
-        self.bot = Bot(token, session=mocked_session)
+        self.bot = aio.Bot(token, session=mocked_session)
 
         self.bot_messages: list[BotMessage] = []
 
@@ -289,11 +279,11 @@ class BotConversation:
                 message=aio_types.Message(
                     message_id=self.update_ids.next(),
                     date=dt.datetime.now(),
-                    chat=types.Chat(
+                    chat=aio_types.Chat(
                         id=self.chat_id,
                         type="private",
                     ),
-                    from_user=types.User(
+                    from_user=aio_types.User(
                         id=self.user_id,
                         is_bot=False,
                         first_name=self.user_first_name,
@@ -343,7 +333,7 @@ class BotConversation:
             bot=self.bot,
             update=aio_types.Update(
                 update_id=self.message_ids.next(),
-                callback_query=types.CallbackQuery(
+                callback_query=aio_types.CallbackQuery(
                     id="test-callback-query",
                     from_user=message.from_user,
                     chat_instance="test-chat-instance",
@@ -412,11 +402,11 @@ class BotConversation:
         return aio_types.Message(
             message_id=self.update_ids.next(),
             date=dt.datetime.now(),
-            chat=types.Chat(
+            chat=aio_types.Chat(
                 id=self.chat_id,
                 type="private",
             ),
-            from_user=types.User(
+            from_user=aio_types.User(
                 id=self.user_id,
                 is_bot=False,
                 first_name="Test",
