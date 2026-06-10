@@ -6,11 +6,10 @@ import pytest
 from aiogram import filters, types
 from aiogram.fsm import context, state
 
-from aiogram_bot_tester import BotTester, convo
+from aiogram_bot_tester import BotTester
 
 # ============================================================
 # SETUP THE BOT TO TEST.
-# You can copy that inside a separate file if you want.
 # ============================================================
 
 
@@ -23,26 +22,40 @@ router = aiogram.Router()
 
 
 @router.message(filters.CommandStart())
-async def cmd_start(message: types.Message, state: context.FSMContext) -> None:
+async def cmd_start(
+    message: types.Message,
+    state: context.FSMContext,
+) -> None:
     await message.answer("Hello! What's your name?")
     await state.set_state(Registration.name)
 
 
 @router.message(Registration.name, aiogram.F.text)
-async def name_chosen(message: types.Message, state: context.FSMContext) -> None:
+async def name_chosen(
+    message: types.Message,
+    state: context.FSMContext,
+) -> None:
     name = message.text
+
     await message.answer(f"Hi, {name}! I like your name. What about your password?")
+
     await state.update_data(name=name)
     await state.set_state(Registration.password)
 
 
 @router.message(Registration.password, aiogram.F.text)
-async def password_chosen(message: types.Message, state: context.FSMContext) -> None:
+async def password_chosen(
+    message: types.Message,
+    state: context.FSMContext,
+) -> None:
     password = message.text
+
     await message.answer("Good, a strong one! Thank you!")
+
     await state.update_data(password=password)
 
-    # Let's pretend here we did something clever with credentials, right?
+    # Let's pretend here we did something clever
+    # with credentials, right?
 
     await state.clear()
 
@@ -55,16 +68,19 @@ async def fallback(message: types.Message) -> None:
 async def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     bot = aiogram.Bot(token=token)
+
     dp = aiogram.Dispatcher()
     dp.include_router(router)
+
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
 
+
 # ============================================================
-# LET'S TEST IT
+# TESTS
 # ============================================================
 
 
@@ -74,46 +90,36 @@ def tester() -> BotTester:
 
 
 @pytest.mark.asyncio
-async def test_full_registration(tester: BotTester) -> None:
-    response = await tester.send_message("/start")
-    assert response.contains("Hello! What's your name?")
-    assert response.in_state(Registration.name)
+async def test_full_registration(
+    tester: BotTester,
+) -> None:
+    response = await tester.start()
+
+    assert response.contains_text("Hello! What's your name?")
+
+    assert await tester.in_state(Registration.name)
 
     response = await tester.send_message("Bob")
-    assert response.contains("Hi, Bob! I like your name. What about your password?")
-    assert response.in_state(Registration.password)
-    assert response.storage_has(name="Bob")
+
+    assert response.contains_text(
+        "Hi, Bob! I like your name. What about your password?"
+    )
+
+    assert await tester.in_state(Registration.password)
+
+    assert await tester.data_has(name="Bob")
 
     response = await tester.send_message("qwerty123")
-    assert response.contains("Good, a strong one! Thank you!")
-    assert response.in_state(None)
+
+    assert response.contains_text("Good, a strong one! Thank you!")
+
+    assert await tester.in_state(None)
 
 
 @pytest.mark.asyncio
-async def test_fallback(tester: BotTester) -> None:
+async def test_fallback(
+    tester: BotTester,
+) -> None:
     response = await tester.send_message("/hehe")
-    assert response.contains("I don't quite understand you...")
 
-
-@pytest.mark.asyncio
-async def test_full_registration_with_convo(tester: BotTester) -> None:
-    await tester.verify(
-        convo.Convo()
-        .command("start")
-        .see("Hello! What's your name?")
-        .in_state(Registration.name)
-        .say("Bob")
-        .see("Hi, Bob! I like your name. What about your password?")
-        .data_has(name="Bob")
-        .in_state(Registration.password)
-        .say("qwerty123")
-        .see("Good, a strong one! Thank you!")
-        .in_state(None)
-    )
-
-
-@pytest.mark.asyncio
-async def test_fallback_with_convo(tester: BotTester) -> None:
-    await tester.verify(
-        convo.Convo().command("hehe").see("I don't quite understand you...")
-    )
+    assert response.contains_text("I don't quite understand you...")

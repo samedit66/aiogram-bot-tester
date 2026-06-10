@@ -6,16 +6,13 @@
 ![python](https://img.shields.io/badge/python-3.10+-blue?logo=python)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/aiogram-bot-tester?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads)](https://pepy.tech/projects/aiogram-bot-tester)
 
-**Navigation / Навигация** - [English version](#english-version) -
-[Русская версия](#русская-версия)
-
 A lightweight testing utility for **offline testing of aiogram bots without real Telegram API calls**.
 
-Its goal is to make it easy to test bot logic deterministically by simulating Telegram updates, intercepting bot API calls, and exposing a clean assertion-friendly response layer.
+Its goal is to make it easy to test bot logic deterministically by simulating Telegram updates, intercepting bot API calls, and exposing a clean, assertion-friendly response layer.
 
-Легковесная библиотека для **оффлайн тестирования ботов, написанных на aiogram без использования интернета и Telegram API**.
+Легковесная библиотека для **оффлайн-тестирования ботов, написанных на aiogram, без использования реального Telegram API**.
 
-Цель данного пакета состоит в том, чтобы обеспечить проверку логики работы бота при помощи симуляции реальных Telegram-запросов с использованием чистых и удобных абстракций.
+Цель пакета — сделать проверку логики бота простой и предсказуемой за счет симуляции Telegram-обновлений, перехвата вызовов bot API и удобного слоя для проверок.
 
 ## Installation / Установка
 
@@ -25,443 +22,278 @@ Stable version / Стабильная версия:
 pip install aiogram_bot_tester
 ```
 
-Latest development version / Последняя разрабатываемая версия
+Latest development version / Последняя версия из репозитория:
 
 ```bash
 pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 ```
 
 > [!NOTE]
-> `aiogram_bot_tester` additionaly installs `pytest-asyncio` for async tests.
-> The library code itself doesn't depend on that package, it is just for convinience.
+> `aiogram_bot_tester` also installs `pytest-asyncio` for async tests.
+> The library itself does not depend on it directly; it is included for convenience.
+>
+> `aiogram_bot_tester` также устанавливает `pytest-asyncio` для асинхронных тестов.
+> Сама библиотека не зависит от него напрямую; пакет добавлен для удобства.
 
 ## Quick example / Пример
 
 ```python
+import pytest
 import aiogram
 from aiogram import filters, types
+
 from aiogram_bot_tester import BotTester
-import pytest
 
 router = aiogram.Router()
+
 
 @router.message(filters.CommandStart())
 async def cmd_start(message: types.Message) -> None:
     await message.answer("Hello! What's your name?")
 
+
 @pytest.mark.asyncio
 async def test_it() -> None:
     tester = BotTester.from_routers(router)
 
-    # For simpler cases, when you have just a ``Bot`` and a ``Dispatcher`:
-    # tester = BotTester(bot=bot, dispatcher=dispatcher)
+    # For simpler cases when you have only a `Dispatcher`:
+    # tester = BotTester.from_dispatcher(dispatcher)
 
-    response = await tester.send_command("start")
-    assert response.contains("Hello")
+    # Send a "/start" command
+    response = await tester.start()
+    assert response.contains_text("Hello")
 ```
 
-## Convo API
+## Public API / Публичный API
 
-> [!IMPORTANT]
-> This API is under heavy discussion and may change a lot.
-> Currently, it's not included in the latest `0.4.0` version.
+### BotTester.from_routers(*routers, **kwargs)
 
-```python
-from aiogram_bot_tester import convo
-
-@pytest.mark.asyncio
-async def test_full_registration_with_convo(tester: BotTester) -> None:
-    await tester.verify(
-        convo.Convo()
-        .command("start")
-        .see("Hello! What's your name?")
-        .in_state(Registration.name)
-        .say("Bob")
-        .see("Hi, Bob! I like your name. What about your password?")
-        .data_has(name="Bob")
-        .in_state(Registration.password)
-        .say("qwerty123")
-        .see("Good, a strong one! Thank you!")
-        .in_state(None)
-    )
-```
-
-
----
-
-# English Version
-
-## Core API
-
-### BotTester.from_routers(*routers)
-
-Construct a `BotTester` instance from a sequence of `Routers`s.
+Construct a `BotTester` instance from one or more `aiogram.Router` objects.
 
 ```python
 tester = BotTester.from_routers(router)
 ```
 
-### send_message(text, **kwargs)
+### BotTester.from_dispatcher(dispatcher, **kwargs)
 
-Send a message to the bot. Returns a special `Response` object described below.
+Construct a `BotTester` instance from an existing dispatcher.
+
+```python
+tester = BotTester.from_dispatcher(dispatcher)
+```
+
+### send_message(text, timeout=None)
+
+Send a user message to the bot.
+
+Returns a `BotMessage`. If the bot does not produce any response, `NoBotResponseError` is raised.
 
 ```python
 response = await tester.send_message("/start")
-assert response.contains("Hello")
+assert response.contains_text("Hello")
 ```
 
-### send_command(command, *command_args, prefix="/")
+### send_command(command, *args, prefix="/")
 
-Helper to make sending commands more easily.
+Send a command to the bot.
 
-Instead of
+Each positional argument is converted to `str` and appended to the command.
 
 ```python
-await tester.send_message(f"/sum {a} {b}")
+response = await tester.send_command("sum", 1, 2)
+assert response.contains_text("3")
 ```
 
-you can simply write 
+### start()
+
+Shortcut for `send_command("start")`.
 
 ```python
-await tester.send_command("sum", a, b)
+response = await tester.start()
 ```
 
-### click_reply_button(text, **kwargs)
+### tap_button(label, timeout=None)
 
-Simulates clicking a reply button. Actually, it's just another way of calling `send_message`. Exists just to clarify intention.
+Tap a button attached to the last bot message.
+
+Reply buttons and inline callback buttons are supported. URL buttons are not tappable; they can only be asserted with `has_url_button()`.
+
+If there is no last bot message, `NoBotMessageError` is raised.
+If the button does not exist, `ButtonNotFoundError` is raised.
+If several buttons with the same label exist, `AmbiguousButtonError` is raised.
+If the bot does not produce a response after the tap, `NoBotResponseError` is raised.
+If the target button is a URL button, `UrlButtonInteractionError` is raised.
 
 ```python
-response = await tester.click_reply_button("Option A")
+response = await tester.tap_button("Next")
 ```
 
-### click_inline_button(label)
+### in_state(state)
 
-Simulates clicking an inline button.
+Return `True` when the bot is currently in the given FSM state.
 
 ```python
-response = await tester.click_inline_button("Press")
+assert await tester.in_state(Form.name)
+assert await tester.in_state(None)
 ```
 
----
+### data_has(**kwargs)
 
-## Response
-
-Each interaction with a `BotTester` returns a `Response` object, which represents answer generated by a Telegram bot.
-
-### contains(*texts)
-
-Returns `True` if this response text contains any of the given `texts`, `False` otherwise.
-
-Example:
+Return `True` when the FSM data contains all the provided key-value pairs.
 
 ```python
-assert response.contains("Hello")
+assert await tester.data_has(name="Bob")
 ```
 
-### matches(*regexes)
+## BotMessage assertions / Проверки BotMessage
 
-Returns `True` if this response text matches any of the given `regexes`, `False` otherwise.
-`regexes` may be a list of either `str`ings or compiled patterns.
+Each call that returns a bot response gives you a `BotMessage` object.
 
-Example:
+### contains_text(*texts)
+
+Return `True` if the message text contains any of the provided substrings.
 
 ```python
-assert response.matches("\d+")
+assert response.contains_text("Hello", "Hi")
 ```
 
-### has_inline_button(label)
+### search_regex(*patterns)
 
-Returns `True` if this response has an inline button with `label`, `False` otherwise.
+Return `True` if the message text matches any of the provided regular expressions.
 
-Example:
+Patterns may be strings or compiled `re.Pattern` objects.
 
 ```python
-assert response.has_inline_button("Click me!")
+assert response.search_regex(r"\d+")
 ```
 
-### has_reply_button(label)
+### has_button(label)
 
-Returns `True` if this response has a button with `label`, `False` otherwise.
-
-Example:
+Return `True` if the message contains a button with the given label.
 
 ```python
-assert response.has_reply_button("Click me!")
+assert response.has_button("Yes")
 ```
 
-### has_inline_keyboard_like(keyboard)
+### has_callback_button(label, callback_data)
 
-Returns `True` if this response has the specified inline `keyboard`, `False` otherwise.
-
-Example:
+Return `True` if the message contains an inline callback button with the given label and callback data.
 
 ```python
-assert response.has_inline_keyboard_like([
+assert response.has_callback_button("Press", "press")
+```
+
+### has_url_button(label, url)
+
+Return `True` if the message contains a URL button with the given label and URL.
+
+```python
+assert response.has_url_button("Google", "https://google.com")
+```
+
+### has_keyboard(keyboard)
+
+Return `True` if the message keyboard matches the provided matrix of button labels.
+
+```python
+assert response.has_keyboard([
     ["Yes", "No"],
     ["Cancel"],
 ])
 ```
 
-### has_reply_keyboard_like(keyboard)
+## Errors / Ошибки
 
-Returns `True` if this response has the specified reply `keyboard`, `False` otherwise.
+The public API uses specific exceptions:
 
-Example:
+- `NoBotResponseError` — the bot did not answer.
+- `NoBotMessageError` — an operation requires a previous bot message.
+- `ButtonNotFoundError` — the requested button was not found.
+- `AmbiguousButtonError` — more than one button with the same label was found.
+- `UrlButtonInteractionError` — a URL button was tapped, but URL buttons cannot be interacted with in tests.
 
-```python
-assert response.has_reply_keyboard_like([
-    ["1", "2", "3"],
-    ["4", "5", "6"],
-])
-```
+Публичный API использует специальные исключения:
 
-### in_state(state)
+- `NoBotResponseError` — бот не ответил.
+- `NoBotMessageError` — операция требует предыдущего сообщения от бота.
+- `ButtonNotFoundError` — нужная кнопка не найдена.
+- `AmbiguousButtonError` — найдено несколько кнопок с одинаковой подписью.
+- `UrlButtonInteractionError` — была нажата URL-кнопка, но такие кнопки нельзя взаимодействовать в тестах.
 
-Returns `True` if after this response the state is `state`, `False` otherwise.
-
-Example:
-
-```python
-assert response.in_state(Form.name)
-```
-
-### storage_has(**kwargs)
-
-Returns `True` when all of the given `kwargs` are present in `storage`.
-
-Example:
-
-```python
-assert response.storage_has(name="Bob")
-```
-
----
-
-## 🚀 Full example
+## Full example / Полный пример
 
 ```python
 import pytest
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+import aiogram
+from aiogram import F
+from aiogram.fsm import context, state
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 
 from aiogram_bot_tester import BotTester
 
-router = Router()
 
-@router.message()
-async def echo(message: Message):
+class Registration(state.StatesGroup):
+    name = state.State()
+    password = state.State()
+
+
+router = aiogram.Router()
+
+
+@router.message(aiogram.filters.CommandStart())
+async def cmd_start(message: Message, state: context.FSMContext) -> None:
     await message.answer(
-        f"Echo: {message.text}",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Press me", callback_data="press")]
-            ]
+        "Hello! What's your name?",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Cancel")]],
+            resize_keyboard=True,
         ),
     )
+    await state.set_state(Registration.name)
 
-@router.callback_query(F.data == "press")
-async def on_press(callback: CallbackQuery):
-    await callback.message.answer("Button clicked!")
 
-@pytest.mark.asyncio
-async def test_full_flow():
-    tester = BotTester.from_routers(router)
-
-    response = await tester.send_message("Hello")
-    assert response.contains("Echo: Hello")
-
-    response = await tester.click_inline_button("Press me")
-    assert response.contains("Button clicked!")
-```
-
-------------------------------------------------------------------------
-
-# Русская версия
-
----
-
-## Core API
-
-### BotTester.from_routers(*routers)
-
-Создает объект `BotTester` из набора роутеров.
-
-```python
-tester = BotTester.from_routers(router1, router2, router3)
-```
-
-### send_message(text, **kwargs)
-
-Симулирует отправку сообщения боту. Возвращает специальный объект `Response`, рассматриваемый далее.
-
-```python
-response = await tester.send_message("/start")
-assert response.contains("Привет")
-```
-
-### send_command(command, *command_args, prefix="/")
-
-Вспомогательная функция для более легкой отправки команд.
-
-Вместо
-
-```python
-await tester.send_message(f"/sum {a} {b}")
-```
-
-можно просто писать
-
-```python
-await tester.send_command("sum", a, b)
-```
-
-### click_reply_button(text, **kwargs)
-
-Симулирует нажатие на reply-кнопку. На самом деле, это просто синоним для метода `send_message`, но с названием отражающим суть.
-
-```python
-response = await tester.click_reply_button("Вариант А")
-```
-
-### click_inline_button(label)
-
-Симулирует нажатие на inline-кнопку.
-
-```python
-response = await tester.click_inline_button("Нажми")
-```
-
----
-
-## Response
-
-В результате любого взаимодействия с `BotTester`, возвращается объект `Response` - ответ, генерируемый Telegram-ботом.
-
-### contains(*texts)
-
-Возвращает `True`, если текст ответа содержит хотя бы одну из указанных подстрок, иначе `False`.
-
-Пример:
-
-```python
-assert response.contains("Привет")
-```
-
-### matches(*regexes)
-
-Возвращает `True`, если текст ответа соответствует регулярному выражению из указанных, иначе `False`.
-В качестве регулярных выражений могут быть указаны литеральные строки или скомпилированные паттерны.
-
-Пример:
-
-```python
-assert response.matches("\d+")
-```
-
-### has_inline_button(label)
-
-Возвращает `True`, если в ответе есть inline-кнопка с указанным текстом.
-
-Привет:
-
-```python
-assert response.has_inline_button("Нажми меня!")
-```
-
-### has_reply_button(label)
-
-Возвращает `True`, если в ответе есть reply-кнопка с указанным текстом.
-
-Example:
-
-```python
-assert response.has_reply_button("Нажми меня!")
-```
-
-### has_inline_keyboard_like(keyboard)
-
-Возвращает `True`, если inline-клавиатура совпадает с заданной структурой.
-
-Example:
-
-```python
-assert response.has_inline_keyboard_like([
-    ["Да", "Нет"],
-    ["Отмена"],
-])
-```
-
-### has_reply_keyboard_like(keyboard)
-
-Возвращает `True`, если reply-клавиатура совпадает с заданной структурой.
-
-Example:
-
-```python
-assert response.has_reply_keyboard_like([
-    ["1", "2", "3"],
-    ["4", "5", "6"],
-])
-```
-
-### in_state(state)
-
-Возвращает `True`, если бот находится в заданном состоянии.
-
-Пример:
-
-```python
-assert response.in_state(Form.name)
-```
-
-### storage_has(**kwargs)
-
-Возвращает `True`, если все переданные пары внутри хранилища данных состояния.
-
-Пример:
-
-```python
-assert response.storage_has(name="Bob")
-```
-
-
----
-
-## 🚀 Полный пример теста
-
-```python
-import pytest
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
-from aiogram_bot_tester import BotTester
-
-router = Router()
-
-@router.message()
-async def echo(message: Message):
+@router.message(Registration.name, aiogram.F.text)
+async def name_chosen(message: Message, state: context.FSMContext) -> None:
+    name = message.text
     await message.answer(
-        f"Echo: {message.text}",
+        f"Hi, {name}! What about your password?",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Нажми меня!", callback_data="press")]
-            ]
+                [InlineKeyboardButton(text="Continue", callback_data="continue")]
+            ],
         ),
     )
+    await state.update_data(name=name)
+    await state.set_state(Registration.password)
 
-@router.callback_query(F.data == "press")
-async def on_press(callback: CallbackQuery):
-    await callback.message.answer("Кнопка нажата!")
+
+@router.callback_query(F.data == "continue")
+async def on_continue(callback: CallbackQuery) -> None:
+    await callback.message.answer("Please send your password.")
+
 
 @pytest.mark.asyncio
-async def test_full_flow():
+async def test_full_flow() -> None:
     tester = BotTester.from_routers(router)
 
-    response = await tester.send_message("Hello")
-    assert response.contains("Echo: Hello")
+    response = await tester.start()
+    assert response.contains_text("Hello")
+    assert response.has_button("Cancel")
+    assert await tester.in_state(Registration.name)
 
-    response = await tester.click_inline_button("Нажми меня!")
-    assert response.contains("Кнопка нажата!")
+    response = await tester.send_message("Bob")
+    assert response.contains_text("Hi, Bob!")
+    assert response.has_callback_button("Continue", "continue")
+    assert await tester.data_has(name="Bob")
+    assert await tester.in_state(Registration.password)
+
+    response = await tester.tap_button("Continue")
+    assert response.contains_text("Please send your password.")
 ```

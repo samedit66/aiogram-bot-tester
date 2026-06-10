@@ -1,9 +1,9 @@
 from .bot_tester import (
+    BotMessage,
     BotTester,
-    Response,
 )
 
 __all__ = [
     "BotTester",
-    "Response",
+    "BotMessage",
 ]

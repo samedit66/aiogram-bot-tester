@@ -12,15 +12,20 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from aiogram_bot_tester import BotTester
+from aiogram_bot_tester.bot_tester import (
+    BotTester,
+    ButtonNotFoundError,
+    NoBotMessageError,
+    NoBotResponseError,
+)
 
 # ============================================================
-# BASIC MESSAGE FLOW
+# SEND MESSAGE
 # ============================================================
 
 
 @pytest.mark.asyncio
-async def test_send_message_returns_response():
+async def test_send_message():
     router = Router()
 
     @router.message()
@@ -32,12 +37,10 @@ async def test_send_message_returns_response():
     response = await tester.send_message("/start")
 
     assert response.text == "Hello"
-    assert response.contains("ll", "ello")
-    assert response.matches("[hH]ello", "^H")
 
 
 @pytest.mark.asyncio
-async def test_send_message_without_response():
+async def test_send_message_no_response():
     router = Router()
 
     @router.message()
@@ -46,9 +49,47 @@ async def test_send_message_without_response():
 
     tester = BotTester.from_routers(router)
 
+    with pytest.raises(NoBotResponseError):
+        await tester.send_message("/start")
+
+
+@pytest.mark.asyncio
+async def test_send_message_contains_text():
+    router = Router()
+
+    @router.message()
+    async def handler(message: Message):
+        await message.answer("Hello World")
+
+    tester = BotTester.from_routers(router)
+
     response = await tester.send_message("/start")
 
-    assert response.text is None
+    assert response.contains_text("Hello")
+    assert response.contains_text("World")
+    assert not response.contains_text("Goodbye")
+
+
+@pytest.mark.asyncio
+async def test_send_message_search_regex():
+    router = Router()
+
+    @router.message()
+    async def handler(message: Message):
+        await message.answer("Order #123")
+
+    tester = BotTester.from_routers(router)
+
+    response = await tester.send_message("/start")
+
+    assert response.search_regex(r"\d+")
+    assert response.search_regex(r"Order")
+    assert not response.search_regex(r"Goodbye")
+
+
+# ============================================================
+# SEND COMMAND
+# ============================================================
 
 
 @pytest.mark.asyncio
@@ -56,25 +97,37 @@ async def test_send_command():
     router = Router()
 
     @router.message(Command("sum"))
-    async def cmd_sum(message: Message, command: CommandObject):
-        if command.args is None:
-            await message.answer("/sum expects two numbers")
-            return
-
+    async def cmd_sum(
+        message: Message,
+        command: CommandObject,
+    ):
         a, b = map(int, command.args.split())
         await message.answer(str(a + b))
 
     tester = BotTester.from_routers(router)
 
-    a = 1
-    b = 2
-    result = 3
-    response = await tester.send_command("sum", a, b)
-    assert response.text == str(result)
+    response = await tester.send_command("sum", 1, 2)
+
+    assert response.text == "3"
+
+
+@pytest.mark.asyncio
+async def test_start():
+    router = Router()
+
+    @router.message(Command("start"))
+    async def start_handler(message: Message):
+        await message.answer("Welcome")
+
+    tester = BotTester.from_routers(router)
+
+    response = await tester.start()
+
+    assert response.text == "Welcome"
 
 
 # ============================================================
-# REPLY KEYBOARDS
+# BUTTON ASSERTIONS
 # ============================================================
 
 
@@ -98,51 +151,12 @@ async def test_has_reply_button():
 
     response = await tester.send_message("/start")
 
-    assert response.has_reply_button("A")
-    assert not response.has_reply_button("B")
+    assert response.has_button("A")
+    assert not response.has_button("B")
 
 
 @pytest.mark.asyncio
-async def test_has_reply_keyboard_like():
-    router = Router()
-
-    @router.message()
-    async def handler(message: Message):
-        await message.answer(
-            "Choose",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[
-                    [
-                        KeyboardButton(text="1"),
-                        KeyboardButton(text="2"),
-                    ],
-                    [
-                        KeyboardButton(text="3"),
-                    ],
-                ],
-                resize_keyboard=True,
-            ),
-        )
-
-    tester = BotTester.from_routers(router)
-
-    response = await tester.send_message("/start")
-
-    assert response.has_reply_keyboard_like(
-        [
-            ["1", "2"],
-            ["3"],
-        ]
-    )
-
-
-# ============================================================
-# INLINE KEYBOARDS
-# ============================================================
-
-
-@pytest.mark.asyncio
-async def test_has_inline_button():
+async def test_has_callback_button():
     router = Router()
 
     @router.message()
@@ -165,12 +179,49 @@ async def test_has_inline_button():
 
     response = await tester.send_message("/start")
 
-    assert response.has_inline_button("Press")
-    assert not response.has_inline_button("Missing")
+    assert response.has_callback_button(
+        "Press",
+        callback_data="press",
+    )
+
+    assert not response.has_callback_button(
+        "Press",
+        callback_data="wrong",
+    )
 
 
 @pytest.mark.asyncio
-async def test_has_inline_keyboard_like():
+async def test_has_url_button():
+    router = Router()
+
+    @router.message()
+    async def handler(message: Message):
+        await message.answer(
+            "Links",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="Google",
+                            url="https://google.com",
+                        )
+                    ]
+                ]
+            ),
+        )
+
+    tester = BotTester.from_routers(router)
+
+    response = await tester.send_message("/start")
+
+    assert response.has_url_button(
+        "Google",
+        "https://google.com",
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_keyboard():
     router = Router()
 
     @router.message()
@@ -180,11 +231,20 @@ async def test_has_inline_keyboard_like():
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
-                        InlineKeyboardButton(text="1", callback_data="1"),
-                        InlineKeyboardButton(text="2", callback_data="2"),
+                        InlineKeyboardButton(
+                            text="1",
+                            callback_data="1",
+                        ),
+                        InlineKeyboardButton(
+                            text="2",
+                            callback_data="2",
+                        ),
                     ],
                     [
-                        InlineKeyboardButton(text="3", callback_data="3"),
+                        InlineKeyboardButton(
+                            text="3",
+                            callback_data="3",
+                        )
                     ],
                 ]
             ),
@@ -194,7 +254,7 @@ async def test_has_inline_keyboard_like():
 
     response = await tester.send_message("/start")
 
-    assert response.has_inline_keyboard_like(
+    assert response.has_keyboard(
         [
             ["1", "2"],
             ["3"],
@@ -203,12 +263,39 @@ async def test_has_inline_keyboard_like():
 
 
 # ============================================================
-# CALLBACK FLOW (INLINE BUTTON CLICK)
+# TAP BUTTON
 # ============================================================
 
 
 @pytest.mark.asyncio
-async def test_click_inline_button_triggers_callback():
+async def test_tap_reply_button():
+    router = Router()
+
+    @router.message(F.text == "/start")
+    async def start_handler(message: Message):
+        await message.answer(
+            "Choose",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Next")]],
+                resize_keyboard=True,
+            ),
+        )
+
+    @router.message(F.text == "Next")
+    async def next_handler(message: Message):
+        await message.answer("Done")
+
+    tester = BotTester.from_routers(router)
+
+    await tester.send_message("/start")
+
+    response = await tester.tap_button("Next")
+
+    assert response.text == "Done"
+
+
+@pytest.mark.asyncio
+async def test_tap_callback_button():
     router = Router()
 
     @router.message()
@@ -235,13 +322,13 @@ async def test_click_inline_button_triggers_callback():
 
     await tester.send_message("/start")
 
-    response = await tester.click_inline_button("Press")
+    response = await tester.tap_button("Press")
 
     assert response.text == "Clicked"
 
 
 # ============================================================
-# FSM STATE HANDLING
+# FSM
 # ============================================================
 
 
@@ -250,7 +337,7 @@ class Form(StatesGroup):
 
 
 @pytest.mark.asyncio
-async def test_fsm_state_is_captured():
+async def test_in_state():
     router = Router()
 
     @router.message()
@@ -263,94 +350,82 @@ async def test_fsm_state_is_captured():
 
     tester = BotTester.from_routers(router)
 
-    response = await tester.send_message("/start")
+    await tester.send_message("/start")
 
-    assert response.state == Form.main
-
-
-# ============================================================
-# MESSAGE HISTORY
-# ============================================================
+    assert await tester.in_state(Form.main)
+    assert not await tester.in_state(None)
 
 
 @pytest.mark.asyncio
-async def test_message_history_is_stored():
+async def test_data_has():
     router = Router()
 
     @router.message()
-    async def handler(message: Message):
-        await message.answer("First")
-        await message.answer("Second")
-
-    tester = BotTester.from_routers(router)
-
-    response = await tester.send_message("/start")
-
-    assert response.text == "Second"
-
-    assert len(tester.messages) == 2
-    assert tester.messages[0].text == "First"
-    assert tester.messages[1].text == "Second"
-
-
-# ============================================================
-# ERROR CASES
-# ============================================================
-
-
-@pytest.mark.asyncio
-async def test_clicking_missing_inline_button_raises():
-    router = Router()
-
-    tester = BotTester.from_routers(router)
-
-    with pytest.raises(ValueError):
-        await tester.click_inline_button("Missing")
-
-
-@pytest.mark.asyncio
-async def test_inline_button_without_callback_data_raises():
-    router = Router()
-
-    @router.message()
-    async def handler(message: Message):
-        await message.answer(
-            "Choose",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text="Broken",
-                            callback_data=None,
-                        )
-                    ]
-                ]
-            ),
-        )
+    async def handler(
+        message: Message,
+        state: FSMContext,
+    ):
+        await state.update_data(name="Bob")
+        await message.answer("Hello")
 
     tester = BotTester.from_routers(router)
 
     await tester.send_message("/start")
 
-    with pytest.raises(ValueError):
-        await tester.click_inline_button("Broken")
+    assert await tester.data_has(name="Bob")
+    assert not await tester.data_has(name="Alice")
 
 
 # ============================================================
-# BOT IGNORES OR NO APPROPRIATE HANDLER FOUND
+# ERRORS
 # ============================================================
 
 
 @pytest.mark.asyncio
-async def test_no_suitable_handler():
+async def test_tap_button_without_last_message():
+    tester = BotTester.from_routers(Router())
+
+    with pytest.raises(NoBotMessageError):
+        await tester.tap_button("Anything")
+
+
+@pytest.mark.asyncio
+async def test_tap_missing_button():
     router = Router()
 
-    @router.message(Command("start"))
-    async def cmd_start(message: Message) -> None:
-        await message.answer("Hi!")
+    @router.message()
+    async def handler(message: Message):
+        await message.answer("Hello")
 
     tester = BotTester.from_routers(router)
 
-    response = await tester.send_message("/bye")
+    await tester.send_message("/start")
 
-    assert response.text is None and response.message is None
+    with pytest.raises(ButtonNotFoundError):
+        await tester.tap_button("Missing")
+
+
+@pytest.mark.asyncio
+async def test_tap_button_without_response():
+    router = Router()
+
+    @router.message(F.text == "/start")
+    async def start_handler(message: Message):
+        await message.answer(
+            "Choose",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Next")]],
+                resize_keyboard=True,
+            ),
+        )
+
+    @router.message(F.text == "Next")
+    async def next_handler(message: Message):
+        pass
+
+    tester = BotTester.from_routers(router)
+
+    await tester.send_message("/start")
+
+    with pytest.raises(NoBotResponseError):
+        await tester.tap_button("Next")
