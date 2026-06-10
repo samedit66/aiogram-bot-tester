@@ -629,4 +629,4 @@ class BotTester:
         Raises `AssertionError` when the bot responds wrong.
         """
 
-        raise NotImplementedError
+        raise NotImplementedError("This feature is currently being designed...")
