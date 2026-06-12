@@ -1,6 +1,6 @@
 [project]
 name = "aiogram_bot_tester"
-version = "1.0.0"
+version = "1.0.1"
 description = "Test your Telegram bots easily"
 readme = "README.md"
 requires-python = ">=3.10"
