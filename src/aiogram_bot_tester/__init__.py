@@ -1,7 +1,5 @@
-from .bot_tester import (
-    BotMessage,
-    BotTester,
-)
+from .bot_tester import BotTester
+from .types import BotMessage
 
 __all__ = [
     "BotTester",

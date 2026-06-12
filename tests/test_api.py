@@ -12,8 +12,8 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from aiogram_bot_tester.bot_tester import (
-    BotTester,
+from aiogram_bot_tester.bot_tester import BotTester
+from aiogram_bot_tester.exceptions import (
     ButtonNotFoundError,
     NoBotMessageError,
     NoBotResponseError,

@@ -5,9 +5,8 @@ import copy
 import dataclasses as dc
 import datetime as dt
 import itertools
-import re
 import unittest.mock as mock
-from typing import Any
+from typing import Any, Iterator
 
 import aiogram as aio
 import aiogram.fsm.context as fsm_context
@@ -17,217 +16,12 @@ import aiogram.methods as aio_methods
 import aiogram.types as aio_types
 from aiogram.client.session import aiohttp
 
-
-@dc.dataclass(frozen=True, slots=True)
-class Button:
-    label: str
+import aiogram_bot_tester.exceptions as abt_exceptions
+import aiogram_bot_tester.types as abt_types
 
 
-@dc.dataclass(frozen=True, slots=True)
-class CallbackButton(Button):
-    data: str
-
-
-@dc.dataclass(frozen=True, slots=True)
-class UrlButton(Button):
-    url: str
-
-
-@dc.dataclass(frozen=True, slots=True)
-class BotMessage:
-    """A message which the bot sends back."""
-
-    text: str | None
-    keyboard: list[list[Button]]
-
-    @property
-    def buttons(self) -> list[Button]:
-        """
-        Flattens the attached keyboard into a flat list of buttons.
-
-        Example:
-
-        ```python
-        keyboard = [[CallbackButton("Yes"), CallbackButton("No")], [CallbackButton("Cancel")]]
-        message = BotMessage("Agree?", keyboard)
-        print(message.buttons()) # A list of callback buttons
-        ```
-        """
-        return list(itertools.chain.from_iterable(self.keyboard))
-
-    def is_empty(self) -> bool:
-        """
-        Checks whether a message is empty.
-        A message is empty when it contains no text (`message_text` is `None`) and
-        no keyboard (`attached_keyboard` is an empty `list`).
-
-        Example:
-
-        ```python
-        print(message.is_empty()) # True or False
-        ```
-        """
-        return not (self.text or self.keyboard)
-
-    def contains_text(self, *texts: str) -> bool:
-        """
-        Checks whether a message contains any of the specified `texts`.
-        Returns `True` if it does, `False` otherwise.
-
-        Example:
-
-        ```python
-        # "Hello, World!" is the message text
-        print(message.contains_text("Hi", "Hello")) # True
-        ```
-        """
-        return bool(self.text and any(text in self.text for text in texts))
-
-    def search_regex(self, *patterns: str | re.Pattern[str]) -> bool:
-        """
-        Checks whether a message any of the specified `regexes`.
-        Converts each `str`-pattern into a `re.Pattern` first.
-        Returns `True` if it matches, `False` otherwise.
-        Matching is backed by `re.search`.
-
-        Example:
-
-        ```python
-        # "1234" is the message text
-        print(message.search_regex(r"\\d+")) # True
-        ```
-        """
-        return bool(
-            self.text
-            and any(
-                pattern.search(self.text)
-                for pattern in (
-                    re.compile(pattern) if isinstance(pattern, str) else pattern
-                    for pattern in patterns
-                )
-            )
-        )
-
-    def has_button(self, label: str) -> bool:
-        """
-        Checks whether a message has the specified button.
-        Does not care about which kind of button it checks, reply or inline.
-
-        Example:
-
-        ```python
-        print(message.has_button("Yes"))
-        ```
-        """
-        return any(label == button.label for button in self.buttons)
-
-    def has_url_button(self, label: str, url: str) -> bool:
-        """
-        Checks whether an inline button is attached with specified `label` and `url`.
-
-        Example:
-
-        ```python
-        message.has_url_button("Google it!", url="google.com")
-        ```
-        """
-        return any(
-            label == button.label and url == button.url
-            for button in self.buttons
-            if isinstance(button, UrlButton)
-        )
-
-    def has_callback_button(self, label: str, callback_data: str) -> bool:
-        """
-        Checks whether an inline button is attached with specified `label` and `callback_data`.
-
-        Example:
-
-        ```python
-        message.has_callback_button("Yes", callback_data="yes-button")
-        ```
-        """
-        return any(
-            label == button.label and callback_data == button.data
-            for button in self.buttons
-            if isinstance(button, CallbackButton)
-        )
-
-    def has_keyboard(self, keyboard: list[list[str]]) -> bool:
-        """
-        Checks whether a message has the specified keyboard.
-        A keyboard is matrix of button names.
-        Order of buttons and presence of them all matter.
-
-        Example:
-
-        ```python
-        message = BotMessage("Agree?", [
-            [CallbackButton("Yes"), CallbackButton("No")],
-            [CallbackButton("Cancel")]
-        ])
-        print(message.has_keyboard([
-            ["Yes", "No"],
-            ["Cancel"]
-        ]))
-        ```
-        """
-        return keyboard == [[button.label for button in row] for row in self.keyboard]
-
-
-class BotTesterError(Exception):
-    """Base exception for all bot testing errors."""
-
-
-class NoBotMessageError(BotTesterError):
-    """Operation requires an existing bot message."""
-
-
-class NoBotResponseError(BotTesterError):
-    """The bot did not produce any response to a user action."""
-
-
-class ButtonNotFoundError(BotTesterError):
-    def __init__(
-        self,
-        label: str,
-        available_buttons: list[Button],
-    ) -> None:
-        self.label = label
-        self.available_buttons = available_buttons
-
-        super().__init__(
-            f"Button '{label}' not found. Available buttons: {available_buttons}"
-        )
-
-
-class UrlButtonInteractionError(BotTesterError):
-    """URL buttons cannot be tapped in tests."""
-
-
-class AmbiguousButtonError(BotTesterError):
-    def __init__(
-        self,
-        label: str,
-        available_buttons: list[Button],
-    ) -> None:
-        self.label = label
-        self.available_buttons = available_buttons
-
-        super().__init__(
-            f"There are several buttons named '{label}', cannot decide which one to tap. "
-            f"Available buttons: {available_buttons}"
-        )
-
-
-@dc.dataclass(slots=True)
-class IdGenerator:
-    start: int = 1
-
-    def next(self) -> int:
-        value = self.start
-        self.start += 1
-        return value
+def ids_generator(start: int = 1) -> Iterator[int]:
+    yield from itertools.count(start)
 
 
 class BotConversation:
@@ -245,20 +39,20 @@ class BotConversation:
         self.chat_id = chat_id
         self.user_id = user_id
         self.user_first_name = user_first_name
-        self.message_ids = IdGenerator()
-        self.update_ids = IdGenerator()
+        self.message_ids = ids_generator()
+        self.update_ids = ids_generator()
 
         mocked_session = aiohttp.AiohttpSession()
         mocked_session.make_request = mock.AsyncMock(side_effect=self._capture_request)
         self.bot = aio.Bot(token, session=mocked_session)
 
-        self.bot_messages: list[BotMessage] = []
+        self.bot_messages: list[abt_types.BotMessage] = []
 
     async def send_message(
         self,
         text: str,
         timeout: int | None = None,
-    ) -> BotMessage:
+    ) -> abt_types.BotMessage:
         """
         Send a message to the bot.
         Returns either a `BotMessage` or `None` when the bot has not answered in sendind
@@ -275,9 +69,9 @@ class BotConversation:
         await self.dispatcher.feed_update(
             bot=self.bot,
             update=aio_types.Update(
-                update_id=self.message_ids.next(),
+                update_id=next(self.message_ids),
                 message=aio_types.Message(
-                    message_id=self.update_ids.next(),
+                    message_id=next(self.update_ids),
                     date=dt.datetime.now(),
                     chat=aio_types.Chat(
                         id=self.chat_id,
@@ -298,14 +92,16 @@ class BotConversation:
             await asyncio.sleep(timeout)
 
         if before == len(self.bot_messages):
-            raise NoBotResponseError(f"Bot did not respond to message: {text!r}")
+            raise abt_exceptions.NoBotResponseError(
+                f"Bot did not respond to message: {text!r}"
+            )
         return self.bot_messages[-1]
 
     # We tap a button using its label, rather than its callback data,
     # because from the point of a user, they tap a button, not send a callback data
     async def tap_callback_button(
         self, label: str, timeout: int | None = None
-    ) -> BotMessage:
+    ) -> abt_types.BotMessage:
         """
         Tap an inline callback button.
         Raises `ValueError` when either there were no last message or no
@@ -318,21 +114,21 @@ class BotConversation:
         ```
         """
         if not self.bot_messages:
-            raise NoBotMessageError(
+            raise abt_exceptions.NoBotMessageError(
                 "Cannot tap a button because the bot has not sent any message yet."
             )
 
         last_message = self.bot_messages[-1]
         callback_data = self._find_callback_data(label)
         if not callback_data:
-            raise ButtonNotFoundError(label, last_message.buttons)
+            raise abt_exceptions.ButtonNotFoundError(label, last_message.buttons)
 
         before = len(self.bot_messages)
         message = self._create_message(last_message.text or "")
         await self.dispatcher.feed_update(
             bot=self.bot,
             update=aio_types.Update(
-                update_id=self.message_ids.next(),
+                update_id=next(self.update_ids),
                 callback_query=aio_types.CallbackQuery(
                     id="test-callback-query",
                     from_user=message.from_user,
@@ -348,7 +144,7 @@ class BotConversation:
             await asyncio.sleep(timeout)
 
         if before == len(self.bot_messages):
-            raise NoBotResponseError(
+            raise abt_exceptions.NoBotResponseError(
                 f"Bot did not respond to tapping the button: {label!r}"
             )
         return self.bot_messages[-1]
@@ -393,14 +189,15 @@ class BotConversation:
             (
                 button.data
                 for button in self.bot_messages[-1].buttons
-                if isinstance(button, CallbackButton) and button.label == label
+                if isinstance(button, abt_types.CallbackButton)
+                and button.label == label
             ),
             None,
         )
 
     def _create_message(self, text: str) -> aio_types.Message:
         return aio_types.Message(
-            message_id=self.update_ids.next(),
+            message_id=next(self.message_ids),
             date=dt.datetime.now(),
             chat=aio_types.Chat(
                 id=self.chat_id,
@@ -429,9 +226,9 @@ class BotConversation:
             if isinstance(markup, aio_types.InlineKeyboardMarkup):
                 keyboard = [
                     [
-                        UrlButton(label=button.text, url=button.url)
+                        abt_types.UrlButton(label=button.text, url=button.url)
                         if button.url
-                        else CallbackButton(
+                        else abt_types.CallbackButton(
                             label=button.text, data=button.callback_data
                         )
                         for button in row
@@ -440,10 +237,10 @@ class BotConversation:
                 ]
             elif isinstance(markup, aio_types.ReplyKeyboardMarkup):
                 keyboard = [
-                    [Button(label=button.text) for button in row]
+                    [abt_types.Button(label=button.text) for button in row]
                     for row in markup.keyboard
                 ]
-        self.bot_messages.append(BotMessage(text=text, keyboard=keyboard))
+        self.bot_messages.append(abt_types.BotMessage(text=text, keyboard=keyboard))
         return mock.MagicMock()
 
 
@@ -489,7 +286,7 @@ class BotTester:
         self,
         text: str,
         timeout: int | None = None,
-    ) -> BotMessage:
+    ) -> abt_types.BotMessage:
         """
         Sends a message to the bot.
         When the bot has not responded to the message, `NoBotResponseError` is raised.
@@ -504,7 +301,7 @@ class BotTester:
 
     async def send_command(
         self, command: str, *args: object, prefix: str = "/"
-    ) -> BotMessage:
+    ) -> abt_types.BotMessage:
         """
         Sends a command to the bot.
         Converts each of the given `args` to `str` first.
@@ -522,7 +319,7 @@ class BotTester:
             command = f"{command} {' '.join(str(arg) for arg in args)}"
         return await self.send_message(command)
 
-    async def start(self) -> BotMessage:
+    async def start(self) -> abt_types.BotMessage:
         """
         Sends a `"/start"` command to the bot.
 
@@ -534,7 +331,9 @@ class BotTester:
         """
         return await self.send_command("start")
 
-    async def tap_button(self, label: str, timeout: int | None = None) -> BotMessage:
+    async def tap_button(
+        self, label: str, timeout: int | None = None
+    ) -> abt_types.BotMessage:
         """
         Taps a button attached to the last sent by the bot message.
         If the button does not exist, raises `ValueError`.
@@ -546,7 +345,7 @@ class BotTester:
         ```
         """
         if not self.bot_conversation.bot_messages:
-            raise NoBotMessageError(
+            raise abt_exceptions.NoBotMessageError(
                 "Cannot tap a button because the bot has not sent any message yet."
             )
 
@@ -555,19 +354,19 @@ class BotTester:
             button for button in last_bot_message.buttons if label == button.label
         ]
         if not buttons:
-            raise ButtonNotFoundError(label, last_bot_message.buttons)
+            raise abt_exceptions.ButtonNotFoundError(label, last_bot_message.buttons)
         elif len(buttons) > 1:
-            raise AmbiguousButtonError(label, last_bot_message.buttons)
+            raise abt_exceptions.AmbiguousButtonError(label, last_bot_message.buttons)
 
         button = buttons[0]
-        if isinstance(button, UrlButton):
-            raise UrlButtonInteractionError(
+        if isinstance(button, abt_types.UrlButton):
+            raise abt_exceptions.UrlButtonInteractionError(
                 f"Button '{label}' is a URL button and cannot be tapped. "
                 "Assert its existence using "
                 "BotMessage.has_url_button(label, url)."
             )
 
-        if isinstance(button, CallbackButton):
+        if isinstance(button, abt_types.CallbackButton):
             bot_message = await self.bot_conversation.tap_callback_button(
                 label, timeout=timeout
             )
