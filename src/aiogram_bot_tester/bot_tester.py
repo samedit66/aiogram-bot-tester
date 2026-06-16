@@ -425,7 +425,32 @@ class BotTester:
 
         Each user message if prefixed with `"User:"` and each bot message is prefixed with `"Bot:"`.
         Interactions are separated with an empty line.
+        Raises `InvalidTranscriptError` when the transcript is not well-formed.
         Raises `AssertionError` when the bot responds wrong.
         """
+        blocks = transcript.strip().split("\n\n")
+        for block in blocks:
+            lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
+            if len(lines) != 2:
+                raise abt_exceptions.InvalidTranscriptError(
+                    f"Each turn must have exactly 2 lines (User + Bot), got {len(lines)}"
+                )
 
-        raise NotImplementedError("This feature is currently being designed...")
+            user_line, bot_line = lines
+            if not user_line.startswith("User:"):
+                raise abt_exceptions.InvalidTranscriptError(
+                    f"Expected line starting with 'User:', got: {user_line!r}"
+                )
+            if not bot_line.startswith("Bot:"):
+                raise abt_exceptions.InvalidTranscriptError(
+                    f"Expected line starting with 'Bot:', got: {bot_line!r}"
+                )
+
+            user_message = user_line[5:].strip()
+            expected_bot_text = bot_line[4:].strip()
+
+            response = await self.send_message(user_message)
+            assert response.contains_text(expected_bot_text), (
+                f"Expected bot to contain '{expected_bot_text}', "
+                f"but got: {response.text!r}"
+            )

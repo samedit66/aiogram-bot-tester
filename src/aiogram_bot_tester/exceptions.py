@@ -44,3 +44,7 @@ class AmbiguousButtonError(BotTesterError):
             f"There are several buttons named '{label}', cannot decide which one to tap. "
             f"Available buttons: {available_buttons}"
         )
+
+
+class InvalidTranscriptError(BotTesterError):
+    """The transcript format is malformed."""

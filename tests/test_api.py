@@ -15,6 +15,7 @@ from aiogram.types import (
 from aiogram_bot_tester.bot_tester import BotTester
 from aiogram_bot_tester.exceptions import (
     ButtonNotFoundError,
+    InvalidTranscriptError,
     NoBotMessageError,
     NoBotResponseError,
 )
@@ -429,3 +430,187 @@ async def test_tap_button_without_response():
 
     with pytest.raises(NoBotResponseError):
         await tester.tap_button("Next")
+
+
+# ============================================================
+# DECLARATIVE CHAT TESTING
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_chat_simple_flow():
+    router = Router()
+
+    @router.message(Command("start"))
+    async def start_handler(message: Message):
+        await message.answer("Hello! What's your name?")
+
+    @router.message(F.text == "Bob")
+    async def name_handler(message: Message):
+        await message.answer(f"Hi, Bob!")
+
+    tester = BotTester.from_routers(router)
+
+    await tester.chat(
+        """
+        User: /start
+        Bot: Hello! What's your name?
+
+        User: Bob
+        Bot: Hi, Bob!
+        """
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_multiline_bot_response():
+    router = Router()
+
+    @router.message(Command("start"))
+    async def start_handler(message: Message):
+        await message.answer(
+            "Welcome to the bot!\nPlease choose an option."
+        )
+
+    tester = BotTester.from_routers(router)
+
+    await tester.chat(
+        """
+        User: /start
+        Bot: Welcome to the bot!
+        """
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_bot_text_mismatch():
+    router = Router()
+
+    @router.message(Command("start"))
+    async def start_handler(message: Message):
+        await message.answer("Hello!")
+
+    tester = BotTester.from_routers(router)
+
+    with pytest.raises(AssertionError):
+        await tester.chat(
+            """
+            User: /start
+            Bot: Goodbye!
+            """
+        )
+
+
+@pytest.mark.asyncio
+async def test_chat_no_bot_response():
+    router = Router()
+
+    @router.message(Command("start"))
+    async def start_handler(message: Message):
+        pass  # bot doesn't respond
+
+    tester = BotTester.from_routers(router)
+
+    with pytest.raises(NoBotResponseError):
+        await tester.chat(
+            """
+            User: /start
+            Bot: Hello!
+            """
+        )
+
+
+@pytest.mark.asyncio
+async def test_chat_malformed_transcript_wrong_format():
+    router = Router()
+    tester = BotTester.from_routers(router)
+
+    with pytest.raises(InvalidTranscriptError):
+        await tester.chat(
+            """
+            User: /start
+
+            Wrong format here
+            """
+        )
+
+
+@pytest.mark.asyncio
+async def test_chat_malformed_transcript_missing_user_prefix():
+    router = Router()
+    tester = BotTester.from_routers(router)
+
+    with pytest.raises(InvalidTranscriptError):
+        await tester.chat(
+            """
+            Message: /start
+            Bot: Hello!
+            """
+        )
+
+
+@pytest.mark.asyncio
+async def test_chat_malformed_transcript_missing_bot_prefix():
+    router = Router()
+    tester = BotTester.from_routers(router)
+
+    with pytest.raises(InvalidTranscriptError):
+        await tester.chat(
+            """
+            User: /start
+            Message: Hello!
+            """
+        )
+
+
+@pytest.mark.asyncio
+async def test_chat_multiple_turns():
+    router = Router()
+
+    @router.message(Command("start"))
+    async def start_handler(message: Message):
+        await message.answer("What's your name?")
+
+    @router.message(F.text == "Alice")
+    async def name_handler(message: Message):
+        await message.answer(f"Hello, Alice!")
+
+    @router.message(F.text == "25")
+    async def age_handler(message: Message):
+        await message.answer("Thanks for the info!")
+
+    tester = BotTester.from_routers(router)
+
+    await tester.chat(
+        """
+        User: /start
+        Bot: What's your name?
+
+        User: Alice
+        Bot: Hello, Alice!
+
+        User: 25
+        Bot: Thanks for the info!
+        """
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_bot_response_contains_expected():
+    router = Router()
+
+    @router.message(Command("start"))
+    async def start_handler(message: Message):
+        await message.answer(
+            "Hello, user! Welcome to our service. How can I help you today?"
+        )
+
+    tester = BotTester.from_routers(router)
+
+    # Substring match should pass even though full text differs
+    await tester.chat(
+        """
+        User: /start
+        Bot: Welcome to our service
+        """
+    )
