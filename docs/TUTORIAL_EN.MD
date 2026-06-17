@@ -478,6 +478,76 @@ async def test_registration_flow():
     assert response.contains_text("Please send your password.")
 ```
 
+## Declarative Testing with `chat()`
+
+For simple conversational flows, the library provides a more concise way to write tests using the `chat()` method. Instead of chaining individual interactions, you describe the entire conversation as a transcript:
+
+```python
+@pytest.mark.asyncio
+async def test_registration_flow():
+    tester = BotTester.from_routers(router)
+
+    await tester.chat(
+        """
+        User: /start
+        Bot: Hello! What's your name?
+
+        User: Bob
+        Bot: Hi, Bob! What about your password?
+        """
+    )
+```
+
+### Format Rules
+
+- Each conversation turn consists of exactly two lines: `User:` followed by `Bot:`
+- Turns are separated by blank lines (double newline)
+- The text after `User:` is sent as a user message to the bot
+- The text after `Bot:` is asserted as a substring match against the bot's response using `contains_text`
+
+### Error Handling
+
+If the transcript format is incorrect, an `InvalidTranscriptError` is raised:
+
+```python
+from aiogram_bot_tester.exceptions import InvalidTranscriptError
+
+with pytest.raises(InvalidTranscriptError):
+    await tester.chat(
+        """
+        User: /start
+        Bot: Hello!
+
+        This line has no User prefix.
+        Bot: Response
+        """
+    )
+```
+
+### When to Use `chat()` vs Step-by-Step API
+
+Use `chat()` when you want a compact, readable description of a conversation flow — similar to how a product spec or user story reads. It's ideal for straightforward linear flows.
+
+Use the step-by-step API (`send_message`, `tap_button`, `in_state`, etc.) when you need intermediate assertions, FSM state checks, or button verification between interactions:
+
+```python
+@pytest.mark.asyncio
+async def test_with_intermediate_checks():
+    tester = BotTester.from_routers(router)
+
+    response = await tester.start()
+    assert response.has_button("Cancel")  # Check keyboard before proceeding
+
+    await tester.chat(
+        """
+        User: Bob
+        Bot: Hi, Bob! What about your password?
+        """
+    )
+
+    assert await tester.in_state(Registration.password)  # Check FSM state
+```
+
 ## What Not to Test
 
 When using `aiogram-bot-tester`, prefer testing behavior:

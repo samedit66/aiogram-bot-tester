@@ -478,6 +478,76 @@ async def test_registration_flow():
     assert response.contains_text("Please send your password.")
 ```
 
+## Декларативное тестирование через `chat()`
+
+Для простых диалоговых сценариев библиотека предоставляет более лаконичный способ написания тестов — метод `chat()`. Вместо цепочки отдельных взаимодействий вы описываете весь разговор как транскрипт:
+
+```python
+@pytest.mark.asyncio
+async def test_registration_flow():
+    tester = BotTester.from_routers(router)
+
+    await tester.chat(
+        """
+        User: /start
+        Bot: Привет! Как тебя зовут?
+
+        User: Bob
+        Bot: Привет, Bob! Теперь нужен пароль.
+        """
+    )
+```
+
+### Правила формата
+
+- Каждый оборот диалога состоит ровно из двух строк: `User:` затем `Bot:`
+- Обороты разделяются пустыми строками (двойной перевод строки)
+- Текст после `User:` отправляется как сообщение пользователя боту
+- Текст после `Bot:` проверяется как подстрока в ответе бота через `contains_text`
+
+### Обработка ошибок
+
+Если формат транскрипта неверен, будет выброшено исключение `InvalidTranscriptError`:
+
+```python
+from aiogram_bot_tester.exceptions import InvalidTranscriptError
+
+with pytest.raises(InvalidTranscriptError):
+    await tester.chat(
+        """
+        User: /start
+        Bot: Привет!
+
+        Эта строка без префикса User.
+        Bot: Ответ
+        """
+    )
+```
+
+### Когда использовать `chat()`, а не пошаговый API
+
+Используйте `chat()`, когда хотите получить компактное, читаемое описание диалога — похоже на то, как читается спецификация продукта или пользовательская история. Идеально подходит для простых линейных сценариев.
+
+Используйте пошаговый API (`send_message`, `tap_button`, `in_state` и т.д.), когда нужны промежуточные проверки, проверка состояния FSM или верификация кнопок между взаимодействиями:
+
+```python
+@pytest.mark.asyncio
+async def test_with_intermediate_checks():
+    tester = BotTester.from_routers(router)
+
+    response = await tester.start()
+    assert response.has_button("Cancel")  # Проверяем клавиатуру перед продолжением
+
+    await tester.chat(
+        """
+        User: Bob
+        Bot: Привет, Bob! Теперь нужен пароль.
+        """
+    )
+
+    assert await tester.in_state(Registration.password)  # Проверяем состояние FSM
+```
+
 ## Что не стоит тестировать
 
 При использовании `aiogram-bot-tester` старайтесь тестировать поведение.
