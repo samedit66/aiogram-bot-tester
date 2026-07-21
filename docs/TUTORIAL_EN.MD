@@ -196,7 +196,7 @@ response = await tester.send_message("Hello")
 The result is always a `BotMessage`.
 
 ```python
-assert response.contains_text("Hello")
+response.assert_contains("Hello")
 ```
 
 ### Sending Commands
@@ -223,7 +223,7 @@ Example:
 
 ```python
 response = await tester.send_command("sum", 1, 2)
-assert response.contains_text("3")
+assert response.text == "3"
 ```
 
 ## Starting the Bot
@@ -244,34 +244,62 @@ response = await tester.send_command("start")
 
 Every interaction returns a `BotMessage`.
 
+Prefer the built-in `assert_*` and `refute_*` methods in tests. They make checks
+more declarative and provide clear failure messages with the expected and actual
+values. The boolean predicates remain available when you need to compose a
+custom condition.
+
 ### Checking Text
 
 ```python
-assert response.contains_text("Hello")
+response.assert_contains("Hello")
 ```
 
 Multiple options may be provided:
 
 ```python
-assert response.contains_text(
+response.assert_contains(
     "Hello",
     "Hi",
     "Welcome",
 )
 ```
 
+When several values are passed, the assertion succeeds if the message contains
+at least one of them. Use `refute_contains()` to assert that none are present:
+
+```python
+response.refute_contains("Error", "Exception")
+```
+
+For an exact comparison, check the public `text` attribute directly. This also
+lets pytest show its standard string diff:
+
+```python
+assert response.text == "Hello!"
+```
+
 ### Using Regular Expressions
 
 ```python
-assert response.search_regex(r"\d+")
+response.assert_matches(r"\d+")
 ```
 
 Useful for dynamic content:
 
 ```python
-assert response.search_regex(
-    r"Order #\d+"
+response.assert_matches(
+    r"Order #\d+",
+    r"Invoice #\d+",
 )
+```
+
+As with `assert_contains()`, multiple patterns use “any” semantics and matching
+is performed with `re.search()`. Use `refute_matches()` to require that none of
+the patterns occur:
+
+```python
+response.refute_matches(r"Traceback", r"Exception")
 ```
 
 ### Working with Buttons
@@ -281,24 +309,24 @@ Buttons are first-class citizens in conversational testing.
 #### Verify a Button Exists
 
 ```python
-assert response.has_button("Continue")
+response.assert_button("Continue")
 ```
 
 #### Verify Callback Buttons
 
 ```python
-assert response.has_callback_button(
+response.assert_callback_button(
     "Continue",
-    "continue",
+    callback_data="continue",
 )
 ```
 
 #### Verify URL Buttons
 
 ```python
-assert response.has_url_button(
+response.assert_url_button(
     "Google",
-    "https://google.com",
+    url="https://google.com",
 )
 ```
 
@@ -307,7 +335,7 @@ Remember that URL buttons can be asserted but **cannot be tapped**.
 #### Verify Entire Keyboard Layout
 
 ```python
-assert response.has_keyboard([
+response.assert_keyboard([
     ["Yes", "No"],
     ["Cancel"],
 ])
@@ -327,10 +355,10 @@ Example flow:
 
 ```python
 response = await tester.start()
-assert response.has_button("Continue")
+response.assert_button("Continue")
 
 response = await tester.tap_button("Continue")
-assert response.contains_text("Next step")
+response.assert_contains("Next step")
 ```
 
 This keeps tests close to how real users interact with the bot.
@@ -342,29 +370,31 @@ FSM support is included.
 ### Verify Current State
 
 ```python
-assert await tester.in_state(Registration.name)
+await tester.assert_state(Registration.name)
 ```
 
 Verify that no state is active:
 
 ```python
-assert await tester.in_state(None)
+await tester.assert_state(None)
 ```
 
 ### Verify FSM Data
 
 ```python
-assert await tester.data_has(name="Bob")
+await tester.assert_data(name="Bob")
 ```
 
 Multiple fields can be checked simultaneously:
 
 ```python
-assert await tester.data_has(
+await tester.assert_data(
     name="Bob",
     age=25,
 )
 ```
+
+The corresponding negative checks are `refute_state()` and `refute_data()`.
 
 ## Full Conversation Example
 
@@ -461,21 +491,21 @@ async def test_registration_flow():
     tester = BotTester.from_routers(router)
 
     response = await tester.start()
-    assert response.contains_text("Hello")
-    assert response.has_button("Cancel")
-    assert await tester.in_state(Registration.name)
+    response.assert_contains("Hello")
+    response.assert_button("Cancel")
+    await tester.assert_state(Registration.name)
 
     response = await tester.send_message("Bob")
-    assert response.contains_text("Hi, Bob!")
-    assert response.has_callback_button(
+    response.assert_contains("Hi, Bob!")
+    response.assert_callback_button(
         label="Continue",
-        data="continue",
+        callback_data="continue",
     )
-    assert await tester.data_has(name="Bob")
-    assert await tester.in_state(Registration.password)
+    await tester.assert_data(name="Bob")
+    await tester.assert_state(Registration.password)
 
     response = await tester.tap_button("Continue")
-    assert response.contains_text("Please send your password.")
+    response.assert_contains("Please send your password.")
 ```
 
 ## Declarative Testing with `chat()`
@@ -503,7 +533,7 @@ async def test_registration_flow():
 - Each conversation turn consists of exactly two lines: `User:` followed by `Bot:`
 - Turns are separated by blank lines (double newline)
 - The text after `User:` is sent as a user message to the bot
-- The text after `Bot:` is asserted as a substring match against the bot's response using `contains_text`
+- The text after `Bot:` is asserted as a substring match against the bot's response using `assert_contains`
 
 ### Error Handling
 
@@ -536,7 +566,7 @@ async def test_with_intermediate_checks():
     tester = BotTester.from_routers(router)
 
     response = await tester.start()
-    assert response.has_button("Cancel")  # Check keyboard before proceeding
+    response.assert_button("Cancel")  # Check keyboard before proceeding
 
     await tester.chat(
         """
@@ -545,7 +575,7 @@ async def test_with_intermediate_checks():
         """
     )
 
-    assert await tester.in_state(Registration.password)  # Check FSM state
+    await tester.assert_state(Registration.password)  # Check FSM state
 ```
 
 ## What Not to Test
@@ -556,14 +586,14 @@ When using `aiogram-bot-tester`, prefer testing behavior:
 
 ```python
 response = await tester.start()
-assert response.contains_text("Hello")
+response.assert_contains("Hello")
 ```
 
 ✅ Good:
 
 ```python
 response = await tester.tap_button("Continue")
-assert response.contains_text("Next step")
+response.assert_contains("Next step")
 ```
 
 ❌ Avoid:

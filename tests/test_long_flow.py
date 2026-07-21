@@ -95,25 +95,23 @@ async def test_full_registration(
 ) -> None:
     response = await tester.start()
 
-    assert response.contains_text("Hello! What's your name?")
+    response.assert_contains("Hello! What's your name?")
 
-    assert await tester.in_state(Registration.name)
+    await tester.assert_state(Registration.name)
 
     response = await tester.send_message("Bob")
 
-    assert response.contains_text(
-        "Hi, Bob! I like your name. What about your password?"
-    )
+    response.assert_contains("Hi, Bob! I like your name. What about your password?")
 
-    assert await tester.in_state(Registration.password)
+    await tester.assert_state(Registration.password)
 
-    assert await tester.data_has(name="Bob")
+    await tester.assert_data(name="Bob")
 
     response = await tester.send_message("qwerty123")
 
-    assert response.contains_text("Good, a strong one! Thank you!")
+    response.assert_contains("Good, a strong one! Thank you!")
 
-    assert await tester.in_state(None)
+    await tester.assert_state(None)
 
 
 @pytest.mark.asyncio
@@ -122,4 +120,4 @@ async def test_fallback(
 ) -> None:
     response = await tester.send_message("/hehe")
 
-    assert response.contains_text("I don't quite understand you...")
+    response.assert_contains("I don't quite understand you...")

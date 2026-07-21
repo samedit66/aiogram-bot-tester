@@ -196,7 +196,7 @@ response = await tester.send_message("Hello")
 Результатом всегда будет объект `BotMessage`.
 
 ```python
-assert response.contains_text("Hello")
+response.assert_contains("Hello")
 ```
 
 ### Отправка команд
@@ -223,7 +223,7 @@ response = await tester.send_command("sum", 1, 2)
 
 ```python
 response = await tester.send_command("sum", 1, 2)
-assert response.contains_text("3")
+assert response.text == "3"
 ```
 
 ## Запуск бота
@@ -244,34 +244,62 @@ response = await tester.send_command("start")
 
 Каждое взаимодействие возвращает объект `BotMessage`.
 
+В тестах предпочтительно использовать встроенные методы `assert_*` и
+`refute_*`: проверки получаются более декларативными, а при падении показывают
+понятное сообщение с ожидаемыми и фактическими значениями. Булевы предикаты
+остаются доступными для составных пользовательских условий.
+
 ### Проверка текста
 
 ```python
-assert response.contains_text("Hello")
+response.assert_contains("Hello")
 ```
 
 Можно передать несколько вариантов:
 
 ```python
-assert response.contains_text(
+response.assert_contains(
     "Hello",
     "Hi",
     "Welcome",
 )
 ```
 
+Если передано несколько значений, проверка проходит, когда ответ содержит хотя
+бы одно из них. `refute_contains()` проверяет, что ни одного значения нет:
+
+```python
+response.refute_contains("Error", "Exception")
+```
+
+Для точного сравнения используйте публичный атрибут `text`. В таком виде pytest
+также покажет стандартный diff строк:
+
+```python
+assert response.text == "Hello!"
+```
+
 ### Использование регулярных выражений
 
 ```python
-assert response.search_regex(r"\d+")
+response.assert_matches(r"\d+")
 ```
 
 Полезно для динамического контента:
 
 ```python
-assert response.search_regex(
-    r"Order #\d+"
+response.assert_matches(
+    r"Order #\d+",
+    r"Invoice #\d+",
 )
+```
+
+Как и `assert_contains()`, несколько паттернов используют семантику «хотя бы
+один», а поиск выполняется через `re.search()`. `refute_matches()` проверяет,
+что ни один паттерн не встречается:
+
+```python
+response.refute_matches(r"Traceback", r"Exception")
 ```
 
 ### Работа с кнопками
@@ -281,24 +309,24 @@ assert response.search_regex(
 #### Проверка наличия кнопки
 
 ```python
-assert response.has_button("Continue")
+response.assert_button("Continue")
 ```
 
 #### Проверка callback-кнопки
 
 ```python
-assert response.has_callback_button(
+response.assert_callback_button(
     "Continue",
-    "continue",
+    callback_data="continue",
 )
 ```
 
 #### Проверка URL-кнопки
 
 ```python
-assert response.has_url_button(
+response.assert_url_button(
     "Google",
-    "https://google.com",
+    url="https://google.com",
 )
 ```
 
@@ -307,7 +335,7 @@ assert response.has_url_button(
 #### Проверка всей раскладки клавиатуры
 
 ```python
-assert response.has_keyboard([
+response.assert_keyboard([
     ["Yes", "No"],
     ["Cancel"],
 ])
@@ -327,10 +355,10 @@ response = await tester.tap_button("Continue")
 
 ```python
 response = await tester.start()
-assert response.has_button("Continue")
+response.assert_button("Continue")
 
 response = await tester.tap_button("Continue")
-assert response.contains_text("Next step")
+response.assert_contains("Next step")
 ```
 
 Так тест остаётся максимально близким к реальному поведению пользователя.
@@ -342,29 +370,31 @@ assert response.contains_text("Next step")
 ### Проверка текущего состояния
 
 ```python
-assert await tester.in_state(Registration.name)
+await tester.assert_state(Registration.name)
 ```
 
 Проверка отсутствия активного состояния:
 
 ```python
-assert await tester.in_state(None)
+await tester.assert_state(None)
 ```
 
 ### Проверка данных FSM
 
 ```python
-assert await tester.data_has(name="Bob")
+await tester.assert_data(name="Bob")
 ```
 
 Можно проверять сразу несколько полей:
 
 ```python
-assert await tester.data_has(
+await tester.assert_data(
     name="Bob",
     age=25,
 )
 ```
+
+Для отрицательных проверок предусмотрены `refute_state()` и `refute_data()`.
 
 ## Полный пример диалога
 
@@ -461,21 +491,21 @@ async def test_registration_flow():
     tester = BotTester.from_routers(router)
 
     response = await tester.start()
-    assert response.contains_text("Hello")
-    assert response.has_button("Cancel")
-    assert await tester.in_state(Registration.name)
+    response.assert_contains("Hello")
+    response.assert_button("Cancel")
+    await tester.assert_state(Registration.name)
 
     response = await tester.send_message("Bob")
-    assert response.contains_text("Hi, Bob!")
-    assert response.has_callback_button(
+    response.assert_contains("Hi, Bob!")
+    response.assert_callback_button(
         label="Continue",
-        data="continue",
+        callback_data="continue",
     )
-    assert await tester.data_has(name="Bob")
-    assert await tester.in_state(Registration.password)
+    await tester.assert_data(name="Bob")
+    await tester.assert_state(Registration.password)
 
     response = await tester.tap_button("Continue")
-    assert response.contains_text("Please send your password.")
+    response.assert_contains("Please send your password.")
 ```
 
 ## Декларативное тестирование через `chat()`
@@ -503,7 +533,7 @@ async def test_registration_flow():
 - Каждый оборот диалога состоит ровно из двух строк: `User:` затем `Bot:`
 - Обороты разделяются пустыми строками (двойной перевод строки)
 - Текст после `User:` отправляется как сообщение пользователя боту
-- Текст после `Bot:` проверяется как подстрока в ответе бота через `contains_text`
+- Текст после `Bot:` проверяется как подстрока в ответе бота через `assert_contains`
 
 ### Обработка ошибок
 
@@ -536,7 +566,7 @@ async def test_with_intermediate_checks():
     tester = BotTester.from_routers(router)
 
     response = await tester.start()
-    assert response.has_button("Cancel")  # Проверяем клавиатуру перед продолжением
+    response.assert_button("Cancel")  # Проверяем клавиатуру перед продолжением
 
     await tester.chat(
         """
@@ -545,7 +575,7 @@ async def test_with_intermediate_checks():
         """
     )
 
-    assert await tester.in_state(Registration.password)  # Проверяем состояние FSM
+    await tester.assert_state(Registration.password)  # Проверяем состояние FSM
 ```
 
 ## Что не стоит тестировать
@@ -556,14 +586,14 @@ async def test_with_intermediate_checks():
 
 ```python
 response = await tester.start()
-assert response.contains_text("Hello")
+response.assert_contains("Hello")
 ```
 
 ✅ Хорошо:
 
 ```python
 response = await tester.tap_button("Continue")
-assert response.contains_text("Next step")
+response.assert_contains("Next step")
 ```
 
 ❌ Избегайте:

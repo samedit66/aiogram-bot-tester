@@ -48,18 +48,22 @@ A Python library for testing Telegram bots built with aiogram (v3.x). It enables
 ### BotMessage (assertion helper)
 
 Immutable dataclass with convenience methods:
-- `contains_text(*texts)` — checks if message text contains any of the given strings
-- `search_regex(*patterns)` — regex matching against message text
+- `contains(*texts)` — checks if message text contains any of the given strings
+- `matches(*patterns)` — `re.search` matching against any given pattern
 - `has_button(label)` — checks for any button by label
 - `has_callback_button(label, callback_data)` — checks inline callback button
 - `has_url_button(label, url)` — checks inline URL button
 - `has_keyboard(keyboard)` — exact match of keyboard layout matrix
+- `assert_*` / `refute_*` helpers — provide readable assertion failures for text,
+  regex, button, and keyboard checks
 
 ### FSM Support
 
 The tester uses aiogram's built-in `MemoryStorage` for FSM state management. Test code can:
 - Check current state via `tester.in_state(state)`
 - Inspect stored data via `tester.data_has(**kwargs)`
+- Assert or refute state and data via `assert_state`, `refute_state`,
+  `assert_data`, and `refute_data`
 
 ## Development Commands
 
@@ -88,8 +92,8 @@ def tester():
 @pytest.mark.asyncio
 async def test_flow(tester):
     response = await tester.start()
-    assert response.contains_text("Hello")
-    assert response.has_button("Continue")
+    response.assert_contains("Hello")
+    response.assert_button("Continue")
 ```
 
 ## Exception Hierarchy
@@ -133,7 +137,7 @@ async def test_registration(tester):
 **Format rules:**
 - Each conversation turn is a block with exactly 2 lines: `User:` followed by `Bot:`
 - Blocks are separated by blank lines
-- Bot text is asserted via substring match (`contains_text`)
+- Bot text is asserted via substring match (`assert_contains`)
 - Only text messages supported (no button tapping in v1)
 
 **Exception:** `InvalidTranscriptError` — raised when transcript format is malformed.

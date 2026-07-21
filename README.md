@@ -6,6 +6,10 @@
 ![python](https://img.shields.io/badge/python-3.10+-blue?logo=python)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/aiogram-bot-tester?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads)](https://pepy.tech/projects/aiogram-bot-tester)
 
+> [!WARNING]
+> This library is under active development. Its API is unstable and may contain
+> frequent breaking changes between releases.
+
 - [English tutorial](docs/TUTORIAL_EN.MD)
 - [Русский туториал](docs/TUTORIAL_RU.md)
 
@@ -67,12 +71,12 @@ async def test_flow() -> None:
     tester = BotTester.from_routers(router)
 
     response = await tester.start()
-    assert response.contains_text("Hello")
-    assert response.has_button("Continue")
+    response.assert_contains("Hello")
+    response.assert_button("Continue")
 
     response = await tester.tap_button("Continue")
-    assert response.contains_text("Please send your name.")
+    response.assert_contains("Please send your name.")
 
     response = await tester.send_message("Bob")
-    assert response.contains_text("Nice to meet you, Bob!")
+    response.assert_contains("Nice to meet you, Bob!")
 ```

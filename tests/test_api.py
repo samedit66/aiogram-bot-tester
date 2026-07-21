@@ -55,7 +55,7 @@ async def test_send_message_no_response():
 
 
 @pytest.mark.asyncio
-async def test_send_message_contains_text():
+async def test_send_message_contains():
     router = Router()
 
     @router.message()
@@ -66,13 +66,13 @@ async def test_send_message_contains_text():
 
     response = await tester.send_message("/start")
 
-    assert response.contains_text("Hello")
-    assert response.contains_text("World")
-    assert not response.contains_text("Goodbye")
+    assert response.contains("Hello")
+    assert response.contains("Goodbye", "World")
+    assert not response.contains("Goodbye", "Farewell")
 
 
 @pytest.mark.asyncio
-async def test_send_message_search_regex():
+async def test_send_message_matches():
     router = Router()
 
     @router.message()
@@ -83,9 +83,9 @@ async def test_send_message_search_regex():
 
     response = await tester.send_message("/start")
 
-    assert response.search_regex(r"\d+")
-    assert response.search_regex(r"Order")
-    assert not response.search_regex(r"Goodbye")
+    assert response.matches(r"\d+")
+    assert response.matches(r"Goodbye", r"Order")
+    assert not response.matches(r"Goodbye", r"Hello")
 
 
 # ============================================================
@@ -447,7 +447,7 @@ async def test_chat_simple_flow():
 
     @router.message(F.text == "Bob")
     async def name_handler(message: Message):
-        await message.answer(f"Hi, Bob!")
+        await message.answer("Hi, Bob!")
 
     tester = BotTester.from_routers(router)
 
@@ -468,9 +468,7 @@ async def test_chat_multiline_bot_response():
 
     @router.message(Command("start"))
     async def start_handler(message: Message):
-        await message.answer(
-            "Welcome to the bot!\nPlease choose an option."
-        )
+        await message.answer("Welcome to the bot!\nPlease choose an option.")
 
     tester = BotTester.from_routers(router)
 
@@ -573,7 +571,7 @@ async def test_chat_multiple_turns():
 
     @router.message(F.text == "Alice")
     async def name_handler(message: Message):
-        await message.answer(f"Hello, Alice!")
+        await message.answer("Hello, Alice!")
 
     @router.message(F.text == "25")
     async def age_handler(message: Message):

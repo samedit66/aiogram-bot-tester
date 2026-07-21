@@ -363,7 +363,7 @@ class BotTester:
             raise abt_exceptions.UrlButtonInteractionError(
                 f"Button '{label}' is a URL button and cannot be tapped. "
                 "Assert its existence using "
-                "BotMessage.has_url_button(label, url)."
+                "BotMessage.assert_url_button(label, url)."
             )
 
         if isinstance(button, abt_types.CallbackButton):
@@ -387,7 +387,7 @@ class BotTester:
         class Form:
             name = State()
 
-        message = await tester.in_state(Form.name)
+        is_in_state = await tester.in_state(Form.name)
         ```
         """
         return state == (await self.bot_conversation.get_state())
@@ -399,11 +399,45 @@ class BotTester:
         Example:
 
         ```python
-        message = await tester.data_has(name="Bob")
+        has_name = await tester.data_has(name="Bob")
         ```
         """
         data = await self.bot_conversation.get_data()
         return all(key in data and data[key] == value for key, value in kwargs.items())
+
+    async def assert_state(self, state: fsm_state.State | None) -> None:
+        """Asserts that the bot is in the specified FSM state."""
+        if not await self.in_state(state):
+            actual = await self.bot_conversation.get_state()
+            expected = state.state if state is not None else None
+            raise AssertionError(
+                f"Expected bot state to be {expected!r}, but current state was {actual!r}."
+            )
+
+    async def refute_state(self, state: fsm_state.State | None) -> None:
+        """Asserts that the bot is not in the specified FSM state."""
+        if await self.in_state(state):
+            expected = state.state if state is not None else None
+            raise AssertionError(
+                f"Expected bot state not to be {expected!r}, but it was active."
+            )
+
+    async def assert_data(self, **kwargs: Any) -> None:
+        """Asserts that the FSM data contains all specified key-value pairs."""
+        if not await self.data_has(**kwargs):
+            actual = await self.bot_conversation.get_data()
+            raise AssertionError(
+                f"Expected FSM data to contain {kwargs!r}, but current data was {actual!r}."
+            )
+
+    async def refute_data(self, **kwargs: Any) -> None:
+        """Asserts that the FSM data does not contain all specified pairs."""
+        if await self.data_has(**kwargs):
+            actual = await self.bot_conversation.get_data()
+            raise AssertionError(
+                f"Expected FSM data not to contain {kwargs!r}, "
+                f"but all specified values were present in {actual!r}."
+            )
 
     async def chat(self, transcript: str) -> None:
         """
@@ -430,7 +464,9 @@ class BotTester:
         """
         blocks = transcript.strip().split("\n\n")
         for block in blocks:
-            lines = [line.strip() for line in block.strip().splitlines() if line.strip()]
+            lines = [
+                line.strip() for line in block.strip().splitlines() if line.strip()
+            ]
             if len(lines) != 2:
                 raise abt_exceptions.InvalidTranscriptError(
                     f"Each turn must have exactly 2 lines (User + Bot), got {len(lines)}"
@@ -450,7 +486,4 @@ class BotTester:
             expected_bot_text = bot_line[4:].strip()
 
             response = await self.send_message(user_message)
-            assert response.contains_text(expected_bot_text), (
-                f"Expected bot to contain '{expected_bot_text}', "
-                f"but got: {response.text!r}"
-            )
+            response.assert_contains(expected_bot_text)
