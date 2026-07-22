@@ -184,7 +184,7 @@ class BotMessage:
                 f"Expected message not to have button {label!r}, but it was present."
             )
 
-    def has_url_button(self, label: str, url: str) -> bool:
+    def has_url_button(self, label: str, *, url: str) -> bool:
         """
         Checks whether an inline button is attached with specified `label` and `url`.
 
@@ -200,9 +200,9 @@ class BotMessage:
             if isinstance(button, UrlButton)
         )
 
-    def assert_url_button(self, label: str, url: str) -> None:
+    def assert_url_button(self, label: str, *, url: str) -> None:
         """Asserts that the specified URL button is attached."""
-        if not self.has_url_button(label, url):
+        if not self.has_url_button(label, url=url):
             available = [
                 (button.label, button.url)
                 for button in self.buttons
@@ -213,15 +213,15 @@ class BotMessage:
                 f"but available URL buttons were {available!r}."
             )
 
-    def refute_url_button(self, label: str, url: str) -> None:
+    def refute_url_button(self, label: str, *, url: str) -> None:
         """Asserts that the specified URL button is not attached."""
-        if self.has_url_button(label, url):
+        if self.has_url_button(label, url=url):
             raise AssertionError(
                 f"Expected message not to have URL button {label!r} with url={url!r}, "
                 "but it was present."
             )
 
-    def has_callback_button(self, label: str, callback_data: str) -> bool:
+    def has_callback_button(self, label: str, *, callback_data: str) -> bool:
         """
         Checks whether an inline button is attached with specified `label` and `callback_data`.
 
@@ -237,9 +237,9 @@ class BotMessage:
             if isinstance(button, CallbackButton)
         )
 
-    def assert_callback_button(self, label: str, callback_data: str) -> None:
+    def assert_callback_button(self, label: str, *, callback_data: str) -> None:
         """Asserts that the specified callback button is attached."""
-        if not self.has_callback_button(label, callback_data):
+        if not self.has_callback_button(label, callback_data=callback_data):
             available = [
                 (button.label, button.data)
                 for button in self.buttons
@@ -251,9 +251,9 @@ class BotMessage:
                 f"but available callback buttons were {available!r}."
             )
 
-    def refute_callback_button(self, label: str, callback_data: str) -> None:
+    def refute_callback_button(self, label: str, *, callback_data: str) -> None:
         """Asserts that the specified callback button is not attached."""
-        if self.has_callback_button(label, callback_data):
+        if self.has_callback_button(label, callback_data=callback_data):
             raise AssertionError(
                 "Expected message not to have callback button "
                 f"{label!r} with callback_data={callback_data!r}, but it was present."

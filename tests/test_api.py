@@ -217,7 +217,7 @@ async def test_has_url_button():
 
     assert response.has_url_button(
         "Google",
-        "https://google.com",
+        url="https://google.com",
     )
 
 
