@@ -31,6 +31,15 @@ pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 
 `aiogram_bot_tester` is a lightweight way to test aiogram bots offline, without real Telegram API calls. It helps you simulate updates, check bot responses, and keep tests deterministic, so bot logic can be covered with confidence even when the conversation flow is complex.
 
+## Features
+
+- **Fully offline testing** — run bot scenarios without a Telegram token, network requests, or real API calls.
+- **Real aiogram pipeline** — updates pass through the actual dispatcher, routers, filters, middleware, and FSM machinery.
+- **Conversation-first API** — send messages and commands, start the bot, and tap reply or callback buttons by their visible labels.
+- **Readable assertions** — check message text, regular expressions, buttons, callback data, URLs, and complete keyboard layouts.
+- **FSM support** — assert the current state and inspect FSM data across multi-step conversation flows.
+- **Flexible test setup** — build a tester from reusable routers or an existing dispatcher and inject fake dependencies through middleware.
+
 ## Quick example
 
 ```python
