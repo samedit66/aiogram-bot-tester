@@ -73,6 +73,34 @@ The tester uses aiogram's built-in `MemoryStorage` for FSM state management. Tes
 | `make check` | Run ruff linter (`uv run ruff check`) |
 | `make format` | Run ruff formatter (`uv run ruff format`) |
 
+## Git Commit Conventions
+
+Follow the repository's existing Conventional Commits style:
+
+- Use the format `<type>: <description>`.
+- Supported types commonly used in this repository:
+  - `feat` — new functionality
+  - `fix` — bug fixes
+  - `docs` — documentation changes
+  - `chore` — maintenance, dependency, or version updates
+  - `refactor` — internal changes without new behavior
+- Use `!` for breaking changes, for example: `feat!: change assertion API`.
+- Write commit messages in English.
+- Keep the description concise, lowercase, and without a trailing period.
+- Do not add a scope unless it provides meaningful information; scopes are normally omitted in this repository.
+- Add a body after a blank line only when the change needs additional explanation. Use bullet points when summarizing several related changes.
+- Keep commits focused on one concern. Documentation and version bumps may be committed separately from implementation changes.
+
+Examples:
+
+```text
+feat: add middleware support to BotTester
+fix: make url and callback arguments keyword-only
+docs: document library features in README
+chore: bump version
+feat!: add declarative assertion helpers
+```
+
 ## Dependencies
 
 - **Runtime**: `aiogram>=3.28.2`, `pytest-asyncio>=1.3.0`
