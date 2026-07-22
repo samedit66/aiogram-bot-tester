@@ -15,6 +15,7 @@ import aiogram.fsm.storage.memory as fsm_memory
 import aiogram.methods as aio_methods
 import aiogram.types as aio_types
 from aiogram.client.session import aiohttp
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 
 import aiogram_bot_tester.exceptions as abt_exceptions
 import aiogram_bot_tester.types as abt_types
@@ -253,13 +254,44 @@ class BotTester:
 
     @classmethod
     def from_dispatcher(cls, dispatcher: aio.Dispatcher, **kwargs: Any) -> BotTester:
+        """Create a tester from an already configured dispatcher.
+
+        Args:
+            dispatcher: Configured aiogram dispatcher used to process test updates.
+            **kwargs: Arguments forwarded to :class:`BotConversation`, plus the
+                optional ``command_prefix`` argument.
+        """
         command_prefix = kwargs.pop("command_prefix", "/")
         bot_conversation = BotConversation(dispatcher=dispatcher, **kwargs)
         return cls(bot_conversation, command_prefix=command_prefix)
 
     @classmethod
-    def from_routers(cls, *routers: aio.Router, **kwargs: Any) -> BotTester:
+    def from_routers(
+        cls,
+        *routers: aio.Router,
+        middlewares: list[BaseMiddleware] | None = None,
+        **kwargs: Any,
+    ) -> BotTester:
+        """Create a tester from routers and optional event middleware.
+
+        Routers are deep-copied before they are attached to a new dispatcher, so
+        the same router fixtures can be reused by multiple tests. Middleware
+        instances are not copied and are registered, in the given order, as inner
+        middleware for both message and callback-query events.
+
+        Args:
+            *routers: Aiogram routers containing the handlers under test.
+            middlewares: Middleware instances to apply to messages and callback
+                queries. For other event types or outer middleware, configure a
+                dispatcher directly and use :meth:`from_dispatcher`.
+            **kwargs: Arguments forwarded to :class:`BotConversation`, plus the
+                optional ``command_prefix`` argument.
+        """
         dispatcher = aio.Dispatcher(storage=fsm_memory.MemoryStorage())
+
+        for middleware in middlewares or []:
+            dispatcher.message.middleware(middleware)
+            dispatcher.callback_query.middleware(middleware)
 
         # We perform deepcopy because of the fact, that a single router cannot
         # be attached to multiple dispatchers. This issues arises when a tester is

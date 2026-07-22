@@ -136,6 +136,34 @@ tester = BotTester.from_routers(
 
 Обычно это лучший вариант, поскольку большинство приложений на aiogram организованы именно вокруг роутеров.
 
+При создании тестера можно передать middleware. Это удобно для внедрения тестовых зависимостей, например фейкового репозитория:
+
+```python
+class RepositoryMiddleware(BaseMiddleware):
+    def __init__(self, repository):
+        self.repository = repository
+
+    async def __call__(self, handler, event, data):
+        data["repository"] = self.repository
+        return await handler(event, data)
+
+
+class FakeRepository:
+    async def get_name(self, user_id: int) -> str:
+        return "Bob"
+
+
+tester = BotTester.from_routers(
+    router,
+    middlewares=[RepositoryMiddleware(FakeRepository())],
+)
+
+response = await tester.send_message("/profile")
+response.assert_contains("Bob")
+```
+
+Middleware применяются к сообщениям и callback query в порядке их передачи.
+
 ### Через Dispatcher
 
 Для более простых приложений:

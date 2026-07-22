@@ -136,6 +136,34 @@ tester = BotTester.from_routers(
 
 This is usually the preferred approach because most aiogram applications are organized around routers.
 
+Middleware can be passed when creating a tester. This is useful for injecting test dependencies, such as a fake repository:
+
+```python
+class RepositoryMiddleware(BaseMiddleware):
+    def __init__(self, repository):
+        self.repository = repository
+
+    async def __call__(self, handler, event, data):
+        data["repository"] = self.repository
+        return await handler(event, data)
+
+
+class FakeRepository:
+    async def get_name(self, user_id: int) -> str:
+        return "Bob"
+
+
+tester = BotTester.from_routers(
+    router,
+    middlewares=[RepositoryMiddleware(FakeRepository())],
+)
+
+response = await tester.send_message("/profile")
+response.assert_contains("Bob")
+```
+
+Middleware are applied to messages and callback queries in the order in which they are passed.
+
 ### Using a Dispatcher
 
 For simpler applications:

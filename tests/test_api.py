@@ -1,5 +1,6 @@
 import pytest
 from aiogram import F, Router
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.filters.command import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -20,9 +21,82 @@ from aiogram_bot_tester.exceptions import (
     NoBotResponseError,
 )
 
+
+class RecordingMiddleware(BaseMiddleware):
+    def __init__(self, name, calls):
+        self.name = name
+        self.calls = calls
+
+    async def __call__(self, handler, event, data):
+        self.calls.append((self.name, type(event).__name__))
+        data["middleware_names"] = [
+            *data.get("middleware_names", []),
+            self.name,
+        ]
+        return await handler(event, data)
+
+
 # ============================================================
 # SEND MESSAGE
 # ============================================================
+
+
+@pytest.mark.asyncio
+async def test_from_routers_registers_middlewares_in_order():
+    router = Router()
+    calls = []
+
+    @router.message()
+    async def handler(message: Message, middleware_names: list[str]):
+        await message.answer(",".join(middleware_names))
+
+    tester = BotTester.from_routers(
+        router,
+        middlewares=[
+            RecordingMiddleware("first", calls),
+            RecordingMiddleware("second", calls),
+        ],
+    )
+
+    response = await tester.send_message("/start")
+
+    assert response.text == "first,second"
+    assert calls == [("first", "Message"), ("second", "Message")]
+
+
+@pytest.mark.asyncio
+async def test_from_routers_registers_middlewares_for_callback_queries():
+    router = Router()
+    calls = []
+
+    @router.message()
+    async def message_handler(message: Message):
+        await message.answer(
+            "Choose",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Press", callback_data="press")]
+                ]
+            ),
+        )
+
+    @router.callback_query(F.data == "press")
+    async def callback_handler(
+        callback: CallbackQuery,
+        middleware_names: list[str],
+    ):
+        await callback.message.answer(",".join(middleware_names))
+
+    tester = BotTester.from_routers(
+        router,
+        middlewares=[RecordingMiddleware("tracked", calls)],
+    )
+
+    await tester.send_message("/start")
+    response = await tester.tap_button("Press")
+
+    assert response.text == "tracked"
+    assert calls == [("tracked", "Message"), ("tracked", "CallbackQuery")]
 
 
 @pytest.mark.asyncio
