@@ -1,5 +1,7 @@
 # aiogram_bot_tester
 
+> Your missing test toolkit for Telegram bots.
+
 ![aiogram](https://img.shields.io/badge/aiogram-3.x-blue?logo=telegram)
 ![telegram](https://img.shields.io/badge/telegram-bot-blue?logo=telegram)
 ![status](https://img.shields.io/badge/status-WIP-orange)
