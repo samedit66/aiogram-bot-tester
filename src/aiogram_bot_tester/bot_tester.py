@@ -251,7 +251,6 @@ class BotTester:
     """A bot functionality tester."""
 
     bot_conversation: BotConversation
-    command_prefix: str = "/"
 
     @classmethod
     def from_dispatcher(cls, dispatcher: aio.Dispatcher, **kwargs: Any) -> BotTester:
@@ -259,8 +258,7 @@ class BotTester:
 
         Args:
             dispatcher: Configured aiogram dispatcher used to process test updates.
-            **kwargs: Arguments forwarded to :class:`BotConversation`, plus the
-                optional ``command_prefix`` argument.
+            **kwargs: Arguments forwarded to :class:`BotConversation`.
 
         Example:
 
@@ -272,9 +270,8 @@ class BotTester:
         tester = BotTester.from_dispatcher(dispatcher)
         ```
         """
-        command_prefix = kwargs.pop("command_prefix", "/")
         bot_conversation = BotConversation(dispatcher=dispatcher, **kwargs)
-        return cls(bot_conversation, command_prefix=command_prefix)
+        return cls(bot_conversation)
 
     @classmethod
     def from_routers(
@@ -299,8 +296,7 @@ class BotTester:
             middlewares: Middleware instances to apply to messages and callback
                 queries. For other event types or outer middleware, configure a
                 dispatcher directly and use :meth:`from_dispatcher`.
-            **kwargs: Arguments forwarded to :class:`BotConversation`, plus the
-                optional ``command_prefix`` argument.
+            **kwargs: Arguments forwarded to :class:`BotConversation`.
 
         Example:
 
@@ -362,12 +358,12 @@ class BotTester:
         return await self.bot_conversation.send_message(text, timeout)
 
     async def send_command(
-        self, command: str, *args: object, prefix: str = "/"
+        self, command: str, *args: object, command_prefix: str = "/"
     ) -> abt_types.BotMessage:
         """
         Sends a command to the bot.
         Converts each of the given `args` to `str` first.
-        Accepts a prefix for the command, which defaults to `"/"`.
+        Accepts a `command_prefix`, which defaults to `"/"`.
         Prefer to use this method instead of `send_message` if possible.
 
         Example:
@@ -376,7 +372,7 @@ class BotTester:
         message = await tester.send_command("sum", 1, 2)
         ```
         """
-        command = f"{prefix}{command}"
+        command = f"{command_prefix}{command}"
         if args:
             command = f"{command} {' '.join(str(arg) for arg in args)}"
         return await self.send_message(command)

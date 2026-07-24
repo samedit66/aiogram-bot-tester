@@ -41,7 +41,6 @@ class RecordingMiddleware(BaseMiddleware):
 # ============================================================
 
 
-
 @pytest.mark.asyncio
 async def test_from_routers_injects_dependencies_into_message_handler():
     router = Router()
@@ -242,6 +241,21 @@ async def test_send_command():
     tester = BotTester.from_routers(router)
 
     response = await tester.send_command("sum", 1, 2)
+
+    assert response.text == "3"
+
+
+@pytest.mark.asyncio
+async def test_send_command_with_custom_command_prefix():
+    router = Router()
+
+    @router.message(F.text == "!sum 1 2")
+    async def cmd_sum(message: Message):
+        await message.answer("3")
+
+    tester = BotTester.from_routers(router)
+
+    response = await tester.send_command("sum", 1, 2, command_prefix="!")
 
     assert response.text == "3"
 
