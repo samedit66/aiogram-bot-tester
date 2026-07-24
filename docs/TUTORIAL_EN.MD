@@ -136,30 +136,42 @@ tester = BotTester.from_routers(
 
 This is usually the preferred approach because most aiogram applications are organized around routers.
 
-Middleware can be passed when creating a tester. This is useful for injecting test dependencies, such as a fake repository:
+#### Passing Dependencies
+
+Test dependencies can be passed directly by name. Aiogram makes them available to handlers with matching argument names:
 
 ```python
-class RepositoryMiddleware(BaseMiddleware):
-    def __init__(self, repository):
-        self.repository = repository
-
-    async def __call__(self, handler, event, data):
-        data["repository"] = self.repository
-        return await handler(event, data)
-
-
 class FakeRepository:
     async def get_name(self, user_id: int) -> str:
         return "Bob"
 
 
+@router.message(Command("profile"))
+async def profile(message: Message, repository: FakeRepository):
+    name = await repository.get_name(message.from_user.id)
+    await message.answer(name)
+
+
 tester = BotTester.from_routers(
     router,
-    middlewares=[RepositoryMiddleware(FakeRepository())],
+    dependencies={"repository": FakeRepository()},
 )
 
 response = await tester.send_message("/profile")
 response.assert_contains("Bob")
+```
+
+This works well with fakes, mocks, repositories, sessions, and services. The same dependency instance can also be inspected after the conversation.
+
+#### Passing Middleware
+
+Middleware can still be passed when you need to test actual middleware behavior:
+
+```python
+tester = BotTester.from_routers(
+    router,
+    middlewares=[AuthMiddleware()],
+)
 ```
 
 Middleware are applied to messages and callback queries in the order in which they are passed.

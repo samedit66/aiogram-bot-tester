@@ -41,6 +41,66 @@ class RecordingMiddleware(BaseMiddleware):
 # ============================================================
 
 
+
+@pytest.mark.asyncio
+async def test_from_routers_injects_dependencies_into_message_handler():
+    router = Router()
+    repository = object()
+    dependency_name = "test-dependency"
+
+    @router.message()
+    async def handler(message: Message, repository: object, name: str):
+        dependencies_match = (
+            repository is expected_repository and name == dependency_name
+        )
+        await message.answer(str(dependencies_match))
+
+    expected_repository = repository
+    tester = BotTester.from_routers(
+        router,
+        dependencies={
+            "repository": repository,
+            "name": dependency_name,
+        },
+    )
+
+    response = await tester.send_message("/start")
+
+    assert response.text == "True"
+
+
+@pytest.mark.asyncio
+async def test_from_routers_injects_dependencies_into_callback_handler():
+    router = Router()
+    repository = object()
+
+    @router.message()
+    async def message_handler(message: Message):
+        await message.answer(
+            "Choose",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Press", callback_data="press")]
+                ]
+            ),
+        )
+
+    @router.callback_query(F.data == "press")
+    async def callback_handler(callback: CallbackQuery, repository: object):
+        await callback.message.answer(str(repository is expected_repository))
+
+    expected_repository = repository
+    tester = BotTester.from_routers(
+        router,
+        dependencies={"repository": repository},
+    )
+
+    await tester.send_message("/start")
+    response = await tester.tap_button("Press")
+
+    assert response.text == "True"
+
+
 @pytest.mark.asyncio
 async def test_from_routers_registers_middlewares_in_order():
     router = Router()

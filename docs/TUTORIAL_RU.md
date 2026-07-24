@@ -136,30 +136,42 @@ tester = BotTester.from_routers(
 
 Обычно это лучший вариант, поскольку большинство приложений на aiogram организованы именно вокруг роутеров.
 
-При создании тестера можно передать middleware. Это удобно для внедрения тестовых зависимостей, например фейкового репозитория:
+#### Передача зависимостей
+
+Тестовые зависимости можно передать напрямую по имени. Aiogram сделает их доступными хендлерам с аргументами под такими же именами:
 
 ```python
-class RepositoryMiddleware(BaseMiddleware):
-    def __init__(self, repository):
-        self.repository = repository
-
-    async def __call__(self, handler, event, data):
-        data["repository"] = self.repository
-        return await handler(event, data)
-
-
 class FakeRepository:
     async def get_name(self, user_id: int) -> str:
         return "Bob"
 
 
+@router.message(Command("profile"))
+async def profile(message: Message, repository: FakeRepository):
+    name = await repository.get_name(message.from_user.id)
+    await message.answer(name)
+
+
 tester = BotTester.from_routers(
     router,
-    middlewares=[RepositoryMiddleware(FakeRepository())],
+    dependencies={"repository": FakeRepository()},
 )
 
 response = await tester.send_message("/profile")
 response.assert_contains("Bob")
+```
+
+Так можно передавать фейки, моки, репозитории, сессии и сервисы. Состояние того же экземпляра зависимости можно проверить после выполнения диалога.
+
+#### Передача middleware
+
+Middleware по-прежнему можно передавать, когда требуется протестировать их реальное поведение:
+
+```python
+tester = BotTester.from_routers(
+    router,
+    middlewares=[AuthMiddleware()],
+)
 ```
 
 Middleware применяются к сообщениям и callback query в порядке их передачи.

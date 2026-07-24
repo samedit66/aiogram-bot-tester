@@ -6,6 +6,7 @@ import dataclasses as dc
 import datetime as dt
 import itertools
 import unittest.mock as mock
+from collections.abc import Mapping
 from typing import Any, Iterator
 
 import aiogram as aio
@@ -269,18 +270,22 @@ class BotTester:
     def from_routers(
         cls,
         *routers: aio.Router,
+        dependencies: Mapping[str, Any] | None = None,
         middlewares: list[BaseMiddleware] | None = None,
         **kwargs: Any,
     ) -> BotTester:
-        """Create a tester from routers and optional event middleware.
+        """Create a tester from routers with optional dependencies and middleware.
 
         Routers are deep-copied before they are attached to a new dispatcher, so
-        the same router fixtures can be reused by multiple tests. Middleware
-        instances are not copied and are registered, in the given order, as inner
-        middleware for both message and callback-query events.
+        the same router fixtures can be reused by multiple tests. Dependencies are
+        added to aiogram's context data and injected into handlers by argument name.
+        Middleware instances are not copied and are registered, in the given order,
+        as inner middleware for both message and callback-query events.
 
         Args:
             *routers: Aiogram routers containing the handlers under test.
+            dependencies: Named objects added to aiogram's context data and made
+                available to handlers.
             middlewares: Middleware instances to apply to messages and callback
                 queries. For other event types or outer middleware, configure a
                 dispatcher directly and use :meth:`from_dispatcher`.
@@ -288,6 +293,7 @@ class BotTester:
                 optional ``command_prefix`` argument.
         """
         dispatcher = aio.Dispatcher(storage=fsm_memory.MemoryStorage())
+        dispatcher.workflow_data.update(dependencies or {})
 
         for middleware in middlewares or []:
             dispatcher.message.middleware(middleware)

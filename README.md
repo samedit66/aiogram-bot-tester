@@ -38,7 +38,7 @@ pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 - **Conversation-first API** — send messages and commands, start the bot, and tap reply or callback buttons by their visible labels.
 - **Readable assertions** — check message text, regular expressions, buttons, callback data, URLs, and complete keyboard layouts.
 - **FSM support** — assert the current state and inspect FSM data across multi-step conversation flows.
-- **Flexible test setup** — build a tester from reusable routers or an existing dispatcher and inject fake dependencies through middleware.
+- **Flexible test setup** — build a tester from reusable routers or an existing dispatcher, pass fake dependencies directly, and attach middleware when needed.
 
 ## Quick example
 

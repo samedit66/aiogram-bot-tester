@@ -35,7 +35,7 @@ A Python library for testing Telegram bots built with aiogram (v3.x). It enables
 
 ### BotTester (main entry point)
 
-- `BotTester.from_routers(*routers)` — creates a tester from aiogram Router instances. Routers are deep-copied internally so the same fixture can be reused across multiple test functions without router attachment conflicts.
+- `BotTester.from_routers(*routers, dependencies=None, middlewares=None)` — creates a tester from aiogram Router instances. Routers are deep-copied internally so the same fixture can be reused across multiple test functions without router attachment conflicts. Named dependencies are added to aiogram's context data, while middleware are registered for message and callback-query events.
 - `BotTester.from_dispatcher(dispatcher)` — creates a tester from an existing Dispatcher instance.
 
 ### BotConversation (internal)
