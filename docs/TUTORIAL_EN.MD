@@ -1,70 +1,105 @@
 # aiogram-bot-tester Tutorial
 
-## Introduction
+`aiogram-bot-tester` is a library for testing Telegram bots built with aiogram
+3.x offline. It feeds simulated updates to a dispatcher and lets you verify bot
+responses, keyboards, callback buttons, and FSM state without starting polling
+or contacting Telegram.
 
-Testing is one of the most important parts of software development. Telegram bots are no exception. A well-designed test suite gives confidence that new features do not break existing functionality and allows teams to iterate faster.
+## Table of Contents
 
-In an ideal architecture, a Telegram bot contains very little logic inside handlers. Handlers should only receive updates, call business services, and return responses. The actual business logic should live in a separate package that can be unit tested independently.
+- [Why Test Telegram Bots](#why-test-telegram-bots)
+- [How the Library Works](#how-the-library-works)
+- [Requirements and Installation](#requirements-and-installation)
+- [Your First Test: an Echo Bot](#your-first-test-an-echo-bot)
+- [Creating a BotTester](#creating-a-bottester)
+  - [From a Dispatcher](#from-a-dispatcher)
+  - [From Routers](#from-routers)
+  - [Dependencies and Middleware](#dependencies-and-middleware)
+  - [Test User Parameters](#test-user-parameters)
+- [BotTester Methods](#bottester-methods)
+  - [send_message](#send_message)
+  - [send_command](#send_command)
+  - [start](#start)
+  - [tap_button](#tap_button)
+  - [in_state and data_has](#in_state-and-data_has)
+  - [assert_state and refute_state](#assert_state-and-refute_state)
+  - [assert_data and refute_data](#assert_data-and-refute_data)
+  - [chat](#chat)
+- [The BotMessage Object](#the-botmessage-object)
+  - [Fields, buttons, and is_empty](#fields-buttons-and-is_empty)
+  - [Checking Text](#checking-text)
+  - [Checking Buttons](#checking-buttons)
+  - [Checking the Keyboard](#checking-the-keyboard)
+- [Exceptions](#exceptions)
+- [Complete Example: Registration with FSM](#complete-example-registration-with-fsm)
+- [How to Structure Tests](#how-to-structure-tests)
+- [Practical Recommendations and Limitations](#practical-recommendations-and-limitations)
 
-However, reality is often different.
+## Why Test Telegram Bots
 
-Many Telegram bots evolve quickly, and significant parts of their logic end up inside handlers, FSM flows, callback handlers, and router chains. While separating everything into services may be architecturally cleaner, doing so too early can become unnecessary overengineering and delay the release of the actual product.
+Tests protect existing flows from regressions, make refactoring safer, and let
+you ship changes with confidence. For a Telegram bot, it is useful to test not
+only individual functions but also the behavior visible to a user:
 
-This is exactly the problem **aiogram-bot-tester** addresses.
+- which response follows a command or message;
+- which buttons are shown and what happens when they are pressed;
+- which FSM state the conversation enters;
+- which data is retained between steps;
+- how the bot behaves throughout a complete user journey.
 
-Instead of focusing on testing individual handlers in isolation, the library allows you to test **the entire conversational flow** of your bot in an offline and deterministic way.
+In an ideal architecture, handlers receive updates, call services, and format
+responses, while business logic lives in separate modules covered by fast unit
+tests. This is a useful direction, but it is not a universal rule.
 
-## What Makes aiogram-bot-tester Different?
+In small or rapidly evolving bots, logic often lives in handlers, FSM
+transitions, and callback chains. Extracting a separate business layer may
+sometimes be irrelevant or take longer than the feature itself. In that case,
+testing the real flow through handlers can be simpler and faster. A practical
+test suite usually combines both approaches:
 
-Many testing libraries for Telegram bots focus on questions such as:
+- test complex calculations and business rules with unit tests;
+- test routing, responses, buttons, dependencies, and FSM behavior with
+  `aiogram-bot-tester`.
 
-> "Did this specific handler execute?"
+## How the Library Works
 
-or
+The Telegram Bot API is the HTTP API through which a bot receives updates and
+performs actions such as sending messages, editing them, and sending media.
+Normally, aiogram calls this API on behalf of your bot.
 
-> "Did this callback handler return the expected result?"
+`aiogram-bot-tester` makes no real network requests. It:
 
-**aiogram-bot-tester** takes a different approach.
+1. creates test `Message`, `CallbackQuery`, and `Update` objects;
+2. passes them to `Dispatcher.feed_update()`;
+3. replaces the aiogram HTTP session with a mock;
+4. intercepts Telegram Bot API calls;
+5. converts `SendMessage` calls into `BotMessage` objects.
 
-Even though it is built on top of `aiogram`, the library is intentionally designed to be as framework-agnostic as possible from the test author's perspective.
+The tests are therefore offline and deterministic. You do not need a real bot
+token, and no messages are sent to real users.
 
-Your tests should not care about:
+At present, response content is fully captured for the Telegram Bot API
+`SendMessage` method: text, reply keyboards, inline callback buttons, and inline
+URL buttons.
 
-- which handler processed the message;
-- which router received the update;
-- how many middleware layers exist;
-- internal implementation details.
+> [!WARNING]
+> Full assertions for photos, videos, documents, stickers, and other media are
+> not supported yet. Message editing and deletion, and other Telegram methods
+> besides `SendMessage`, are not supported either. Do not use the current
+> `BotMessage` representation to assert the content of those calls.
 
-Instead, tests should look like a real conversation:
+If a handler calls `message.answer()` several times in response to one action,
+all messages are captured internally, but the public interaction method returns
+the **last** captured `BotMessage`.
 
-```
-User: /start
-Bot: Hello! What's your name?
+## Requirements and Installation
 
-User: Bob
-Bot: Hi, Bob! What about your password?
+Requirements:
 
-User presses "Continue"
-Bot: Please send your password.
-```
-
-The test becomes a description of behavior rather than implementation.
-
-## Core Philosophy
-
-To keep tests framework-agnostic and conversational, the library intentionally introduces some limitations.
-
-The core testing model consists of actions such as:
-
-1. Send a message.
-2. Receive a response.
-3. Press a button.
-4. Verify state.
-5. Continue the conversation.
-
-This allows tests to read almost like chat transcripts while remaining deterministic and easy to maintain.
-
-## Installation
+- Python 3.10 or newer;
+- aiogram 3.x;
+- pytest;
+- pytest-asyncio.
 
 Install the stable version:
 
@@ -72,73 +107,120 @@ Install the stable version:
 pip install aiogram_bot_tester
 ```
 
-Or install the latest development version:
+Or install the latest version from the repository:
 
 ```bash
 pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 ```
 
-The package also installs `pytest-asyncio` for convenience when writing asynchronous tests.
-
-## Understanding the Public API
-
-### What You Should Actually Use
-
-Internally, the library consists of three submodules:
-
-- `bot_tester`
-- `types`
-- `exceptions`
-
-However, these modules are **implementation details**.
-
-For most projects, you should only work with:
-
-- `BotTester` (from the `bot_tester` submodule)
-- `BotMessage` (from the `types` submodule)
-
-Everything else should be treated as **internal machinery**.
-
-### Do Not Test Internal Exceptions
-
-The library exposes several exception types, but they are primarily intended as developer diagnostics.
-
-Avoid writing tests like:
+`pytest-asyncio` is installed as a library dependency. Every asynchronous test
+in this tutorial is decorated with `@pytest.mark.asyncio`:
 
 ```python
-with pytest.raises(ButtonNotFoundError):
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_something() -> None:
     ...
 ```
 
-The purpose of the library is to test bot behavior, not the implementation details of the testing framework itself.
-
-Focus on **validating the user-visible flow** instead.
-
-## Creating a Tester
-
-There are two ways to create a tester.
-
-### Using Routers (Recommended)
+Import the public classes from the package root:
 
 ```python
-tester = BotTester.from_routers(router)
+from aiogram_bot_tester import BotMessage, BotTester
 ```
 
-Multiple routers can also be passed:
+## Your First Test: an Echo Bot
+
+Start with the classic setup: one `Dispatcher` and one handler. The echo bot
+returns the text it receives.
+
+```python
+import pytest
+from aiogram import Dispatcher
+from aiogram.types import Message
+
+from aiogram_bot_tester import BotTester
+
+
+dispatcher = Dispatcher()
+
+
+@dispatcher.message()
+async def echo(message: Message) -> None:
+    await message.answer(message.text or "")
+
+
+@pytest.mark.asyncio
+async def test_echo() -> None:
+    tester = BotTester.from_dispatcher(dispatcher)
+
+    response = await tester.send_message("Hello!")
+
+    assert response.text == "Hello!"
+```
+
+`send_message()` passes a simulated message through the real dispatcher
+pipeline. The handler runs normally, while the mock session intercepts
+`message.answer()`.
+
+## Creating a BotTester
+
+### From a Dispatcher
+
+```python
+BotTester.from_dispatcher(dispatcher, **kwargs)
+```
+
+Parameters:
+
+- `dispatcher` — a configured `aiogram.Dispatcher`;
+- `**kwargs` — test conversation parameters described below.
+
+Use this form when your application already assembles a dispatcher with
+routers, middleware, dependencies, and storage:
+
+```python
+tester = BotTester.from_dispatcher(dispatcher)
+```
+
+The method returns a new `BotTester` and raises no library-specific exceptions
+on its own.
+
+### From Routers
+
+```python
+BotTester.from_routers(
+    *routers,
+    dependencies=None,
+    middlewares=None,
+    **kwargs,
+)
+```
+
+Parameters:
+
+- `*routers` — one or more `aiogram.Router` objects;
+- `dependencies` — a mapping of names to objects made available through aiogram
+  dependency injection;
+- `middlewares` — inner middleware for `message` and `callback_query` events;
+- `**kwargs` — test conversation parameters.
 
 ```python
 tester = BotTester.from_routers(
     registration_router,
-    admin_router,
     profile_router,
 )
 ```
 
-This is usually the preferred approach because most aiogram applications are organized around routers.
+The library creates a `Dispatcher` with `MemoryStorage` and deep-copies each
+router before attaching it. A router can therefore be used in a fixture invoked
+by multiple tests. Middleware instances are not copied.
 
-#### Passing Dependencies
+### Dependencies and Middleware
 
-Test dependencies can be passed directly by name. Aiogram makes them available to handlers with matching argument names:
+The names in `dependencies` must match handler arguments:
 
 ```python
 class FakeRepository:
@@ -147,7 +229,7 @@ class FakeRepository:
 
 
 @router.message(Command("profile"))
-async def profile(message: Message, repository: FakeRepository):
+async def profile(message: Message, repository: FakeRepository) -> None:
     name = await repository.get_name(message.from_user.id)
     await message.answer(name)
 
@@ -156,344 +238,476 @@ tester = BotTester.from_routers(
     router,
     dependencies={"repository": FakeRepository()},
 )
-
-response = await tester.send_message("/profile")
-response.assert_contains("Bob")
 ```
 
-This works well with fakes, mocks, repositories, sessions, and services. The same dependency instance can also be inspected after the conversation.
-
-#### Passing Middleware
-
-Middleware can still be passed when you need to test actual middleware behavior:
+Middleware run in the order in which they are passed:
 
 ```python
 tester = BotTester.from_routers(
     router,
-    middlewares=[AuthMiddleware()],
+    middlewares=[AuthMiddleware(), LoggingMiddleware()],
 )
 ```
 
-Middleware are applied to messages and callback queries in the order in which they are passed.
+For outer middleware or other event types, configure a dispatcher directly and
+use `from_dispatcher()`.
 
-### Using a Dispatcher
+### Test User Parameters
 
-For simpler applications:
+Both factory methods pass `**kwargs` to the test conversation:
 
-```python
-tester = BotTester.from_dispatcher(dispatcher)
-```
-
-This is useful when your bot is small or when routers are not separated.
-
-## Recommended Test Structure
-
-As projects grow, test organization becomes important.
-
-A good approach is to mirror your router structure inside the test directory.
-
-### Example Bot Structure
-
-```
-bot/
-├── main.py
-├── routers/
-│   ├── registration.py
-│   ├── profile.py
-│   ├── admin.py
-│   └── support.py
-└── services/
-    ├── users.py
-    └── notifications.py
-```
-
-### Recommended Test Structure
-
-```
-tests/
-├── registration/
-│   └── test_registration_flow.py
-├── profile/
-│   └── test_profile_flow.py
-├── admin/
-│   └── test_admin_flow.py
-└── support/
-    └── test_support_flow.py
-```
-
-This makes it easy to locate tests corresponding to specific conversation flows.
-
-Even if you use a single dispatcher, organizing tests by user flows is still recommended.
-
-## Sending Messages
-
-The most fundamental operation is sending a user message.
+- `token: str = "42:TEST"` — a syntactically valid fake token;
+- `chat_id: int = 1` — test chat ID;
+- `user_id: int = 1` — test user ID;
+- `user_first_name: str = "Test"` — test user's first name.
 
 ```python
-response = await tester.send_message("Hello")
+tester = BotTester.from_routers(
+    router,
+    chat_id=100,
+    user_id=42,
+    user_first_name="Alice",
+)
 ```
 
-The result is always a `BotMessage`.
+Do not pass a real Telegram token: network requests are mocked.
+
+## BotTester Methods
+
+Methods that model a user action and expect a bot response—`send_message()`,
+`send_command()`, `start()`, and `tap_button()`—return the last `BotMessage`.
+Predicate methods return `bool`; assertion methods and `chat()` return `None`.
+
+### send_message
 
 ```python
-response.assert_contains("Hello")
+await tester.send_message(text, timeout=None)
 ```
 
-### Sending Commands
+Parameters:
 
-Commands can be sent directly.
+- `text: str` — user message text;
+- `timeout: int | None` — seconds to wait **after**
+  `Dispatcher.feed_update()` and before checking for a response.
 
 ```python
-response = await tester.send_command("help")
+@pytest.mark.asyncio
+async def test_greeting() -> None:
+    response = await tester.send_message("Alice")
+    response.assert_contains("Hello, Alice")
 ```
 
-Commands with arguments are also supported.
+If the bot sends no response, `NoBotResponseError` is raised.
+
+`timeout` is not a deadline and does not interrupt a slow handler. The
+dispatcher first finishes processing the update, then the library calls
+`asyncio.sleep(timeout)`, and only then checks for a response.
+
+### send_command
 
 ```python
-response = await tester.send_command("sum", 1, 2)
+await tester.send_command(command, *args, command_prefix="/")
 ```
 
-This generates:
+Parameters:
 
-```
-/sum 1 2
-```
-
-Example:
+- `command: str` — command name without the prefix;
+- `*args: object` — arguments, each converted with `str`;
+- `command_prefix: str` — command prefix, `/` by default.
 
 ```python
-response = await tester.send_command("sum", 1, 2)
-assert response.text == "3"
+@pytest.mark.asyncio
+async def test_sum() -> None:
+    response = await tester.send_command("sum", 1, 2)
+    assert response.text == "3"
 ```
 
-## Starting the Bot
-
-Since `/start` is the most common command, a shortcut exists.
+The bot receives `/sum 1 2`. The prefix can be changed:
 
 ```python
-response = await tester.start()
+response = await tester.send_command("help", command_prefix="!")
 ```
 
-Equivalent to:
+The method calls `send_message()` without a timeout and raises
+`NoBotResponseError` if the bot does not respond.
+
+### start
 
 ```python
-response = await tester.send_command("start")
+await tester.start()
 ```
 
-## Verifying Bot Responses
+A parameterless shortcut for `await tester.send_command("start")`.
 
-Every interaction returns a `BotMessage`.
+```python
+@pytest.mark.asyncio
+async def test_start() -> None:
+    response = await tester.start()
+    response.assert_contains("Welcome")
+```
 
-Prefer the built-in `assert_*` and `refute_*` methods in tests. They make checks
-more declarative and provide clear failure messages with the expected and actual
-values. The boolean predicates remain available when you need to compose a
-custom condition.
+If the bot does not respond to `/start`, `NoBotResponseError` is raised.
+
+### tap_button
+
+```python
+await tester.tap_button(label, timeout=None)
+```
+
+Parameters:
+
+- `label: str` — visible text of a button in the bot's last message;
+- `timeout: int | None` — post-processing wait with the same semantics as in
+  `send_message()`.
+
+For a reply button, the library sends its label as a regular user message. For a
+callback button, it creates a `CallbackQuery` with the corresponding
+`callback_data`.
+
+```python
+@pytest.mark.asyncio
+async def test_continue_button() -> None:
+    response = await tester.start()
+    response.assert_button("Continue")
+
+    response = await tester.tap_button("Continue")
+    response.assert_contains("Next step")
+```
+
+Exceptions:
+
+- `NoBotMessageError` — the bot has not sent a message yet;
+- `ButtonNotFoundError` — no button has that label;
+- `AmbiguousButtonError` — several buttons have the same label;
+- `UrlButtonInteractionError` — the matching button opens a URL;
+- `NoBotResponseError` — the action was handled but produced no response.
+
+A URL button can be asserted through `BotMessage`, but cannot be "pressed":
+opening a browser is outside the conversation with the bot.
+
+### in_state and data_has
+
+```python
+await tester.in_state(state)
+await tester.data_has(**kwargs)
+```
+
+`in_state(state)` accepts `aiogram.fsm.state.State` or `None` and reports whether
+the current state matches. `None` means that no FSM state is active.
+
+`data_has(**kwargs)` returns `True` only if FSM data contains every supplied
+key-value pair.
+
+```python
+@pytest.mark.asyncio
+async def test_state_predicates() -> None:
+    assert await tester.in_state(Registration.name)
+    assert await tester.data_has(source="start", attempts=1)
+```
+
+These methods raise no library-specific exceptions.
+
+### assert_state and refute_state
+
+```python
+await tester.assert_state(state)
+await tester.refute_state(state)
+```
+
+Both methods accept `State | None`.
+
+- `assert_state()` requires the current state to equal the argument;
+- `refute_state()` requires the states to differ.
+
+```python
+@pytest.mark.asyncio
+async def test_registration_state() -> None:
+    await tester.assert_state(Registration.name)
+    await tester.refute_state(Registration.password)
+```
+
+A failed condition raises `AssertionError` with the expected and actual state.
+
+### assert_data and refute_data
+
+```python
+await tester.assert_data(**kwargs)
+await tester.refute_data(**kwargs)
+```
+
+- `assert_data()` requires every supplied pair to be present;
+- `refute_data()` succeeds if at least one pair is absent or has a different
+  value.
+
+```python
+@pytest.mark.asyncio
+async def test_registration_data() -> None:
+    await tester.assert_data(name="Bob", age=25)
+    await tester.refute_data(name="Alice", age=25)
+```
+
+A failed condition raises `AssertionError`.
+
+### chat
+
+```python
+await tester.chat(transcript)
+```
+
+`transcript: str` describes a linear conversation. Each block has exactly two
+non-empty lines, and blocks are separated by a blank line:
+
+```python
+@pytest.mark.asyncio
+async def test_greeting_chat() -> None:
+    await tester.chat(
+        """
+        User: /start
+        Bot: What is your name?
+
+        User: Bob
+        Bot: Hello, Bob!
+        """
+    )
+```
+
+Text after `User:` is sent through `send_message()`. Text after `Bot:` is
+checked as a substring through `BotMessage.assert_contains()`.
+
+`chat()` boundaries:
+
+- only linear pairs of text messages;
+- button presses cannot be represented;
+- intermediate FSM and keyboard checks cannot be placed inside the transcript;
+- each response uses substring matching rather than exact equality.
+
+For buttons, FSM, and branching, combine `chat()` with the step-by-step API or
+use only the step-by-step API.
+
+Exceptions:
+
+- `InvalidTranscriptError` — incorrect line count or missing `User:`/`Bot:`
+  prefix;
+- `NoBotResponseError` — the bot did not answer one of the messages;
+- `AssertionError` — the response did not contain the expected text.
+
+## The BotMessage Object
+
+`BotMessage` is an immutable dataclass representing a captured `SendMessage`.
+You normally do not construct it yourself; `BotTester` methods return it.
+
+### Fields, buttons, and is_empty
+
+Public fields:
+
+- `text: str | None` — response text;
+- `keyboard: list[list[Button]]` — rows of the captured keyboard.
+
+Buttons are represented by:
+
+- `Button(label)` — reply button;
+- `CallbackButton(label, data)` — inline callback button;
+- `UrlButton(label, url)` — inline URL button.
+
+`message.buttons` is a property that flattens `keyboard` into a single list.
+`message.is_empty()` returns `True` when the message has neither non-empty text
+nor a keyboard.
+
+```python
+assert response.text == "Choose an action"
+assert [button.label for button in response.buttons] == ["Yes", "No"]
+assert not response.is_empty()
+```
+
+These operations raise no special exceptions.
 
 ### Checking Text
 
 ```python
-response.assert_contains("Hello")
+message.contains(text, *texts) -> bool
+message.matches(pattern, *patterns) -> bool
+message.assert_contains(text, *texts) -> None
+message.refute_contains(text, *texts) -> None
+message.assert_matches(pattern, *patterns) -> None
+message.refute_matches(pattern, *patterns) -> None
 ```
 
-Multiple options may be provided:
+`contains()` returns `True` if the message text contains at least one supplied
+string. `matches()` uses `re.search()` and accepts strings or compiled
+`re.Pattern` objects.
 
 ```python
-response.assert_contains(
-    "Hello",
-    "Hi",
-    "Welcome",
-)
+assert response.contains("Hello", "Welcome")
+assert response.matches(r"Order #\d+")
 ```
 
-When several values are passed, the assertion succeeds if the message contains
-at least one of them. Use `refute_contains()` to assert that none are present:
+Assert variants require at least one value to match. Refute variants require no
+value to match:
 
 ```python
-response.refute_contains("Error", "Exception")
+response.assert_contains("Hello", "Welcome")
+response.refute_contains("Error", "Traceback")
+response.assert_matches(r"Order #\d+", r"Invoice #\d+")
+response.refute_matches(r"failed", r"exception")
 ```
 
-For an exact comparison, check the public `text` attribute directly. This also
-lets pytest show its standard string diff:
+Every method requires at least one text or pattern. Boolean methods return
+`False` when `text is None`. Assert/refute methods raise `AssertionError` when
+their condition fails.
+
+For exact comparison, use the `text` field:
 
 ```python
 assert response.text == "Hello!"
 ```
 
-### Using Regular Expressions
+### Checking Buttons
 
 ```python
-response.assert_matches(r"\d+")
+message.has_button(label) -> bool
+message.assert_button(label) -> None
+message.refute_button(label) -> None
 ```
 
-Useful for dynamic content:
+These methods check the label of any button type:
 
 ```python
-response.assert_matches(
-    r"Order #\d+",
-    r"Invoice #\d+",
-)
-```
-
-As with `assert_contains()`, multiple patterns use “any” semantics and matching
-is performed with `re.search()`. Use `refute_matches()` to require that none of
-the patterns occur:
-
-```python
-response.refute_matches(r"Traceback", r"Exception")
-```
-
-### Working with Buttons
-
-Buttons are first-class citizens in conversational testing.
-
-#### Verify a Button Exists
-
-```python
+assert response.has_button("Continue")
 response.assert_button("Continue")
+response.refute_button("Delete")
 ```
 
-#### Verify Callback Buttons
+For URL buttons:
 
 ```python
-response.assert_callback_button(
-    "Continue",
-    callback_data="continue",
+message.has_url_button(label, *, url) -> bool
+message.assert_url_button(label, *, url) -> None
+message.refute_url_button(label, *, url) -> None
+```
+
+Both arguments must match; `url` is keyword-only:
+
+```python
+assert response.has_url_button(
+    "Documentation",
+    url="https://example.com/docs",
 )
-```
-
-#### Verify URL Buttons
-
-```python
 response.assert_url_button(
-    "Google",
-    url="https://google.com",
+    "Documentation",
+    url="https://example.com/docs",
+)
+response.refute_url_button(
+    "Delete",
+    url="https://example.com/delete",
 )
 ```
 
-Remember that URL buttons can be asserted but **cannot be tapped**.
-
-#### Verify Entire Keyboard Layout
+For callback buttons:
 
 ```python
-response.assert_keyboard([
+message.has_callback_button(label, *, callback_data) -> bool
+message.assert_callback_button(label, *, callback_data) -> None
+message.refute_callback_button(label, *, callback_data) -> None
+```
+
+`callback_data` is keyword-only, and both label and data must match:
+
+```python
+assert response.has_callback_button("Yes", callback_data="confirm")
+response.assert_callback_button("Yes", callback_data="confirm")
+response.refute_callback_button("No", callback_data="confirm")
+```
+
+Boolean methods return `True` or `False`. Assert/refute methods raise
+`AssertionError` when their condition fails.
+
+### Checking the Keyboard
+
+```python
+message.has_keyboard(keyboard) -> bool
+message.assert_keyboard(keyboard) -> None
+message.refute_keyboard(keyboard) -> None
+```
+
+`keyboard: list[list[str]]` is a matrix of labels. Every row, every button, and
+their order must match:
+
+```python
+expected = [
     ["Yes", "No"],
     ["Cancel"],
-])
+]
+
+assert response.has_keyboard(expected)
+response.assert_keyboard(expected)
+response.refute_keyboard([["Delete"]])
 ```
 
-This is useful when keyboard arrangement itself matters.
+`has_keyboard()` returns `bool`; assertion variants raise `AssertionError` when
+their condition fails.
 
-#### Interacting with Buttons
+## Exceptions
 
-The library supports conversational interaction with both reply buttons and callback buttons.
+All library-specific exceptions inherit from `BotTesterError`:
 
-```python
-response = await tester.tap_button("Continue")
-```
+| Exception | When it is raised |
+|---|---|
+| `NoBotMessageError` | an action requires a previous bot message |
+| `NoBotResponseError` | the bot sends no response to an action |
+| `ButtonNotFoundError` | no button has the requested label |
+| `AmbiguousButtonError` | several buttons have the requested label |
+| `UrlButtonInteractionError` | a test attempts to press a URL button |
+| `InvalidTranscriptError` | a `chat()` transcript is malformed |
 
-Example flow:
+`assert_*` and `refute_*` methods use the standard `AssertionError`, allowing
+pytest to report them as normal assertion failures.
 
-```python
-response = await tester.start()
-response.assert_button("Continue")
+Knowing the exceptions is useful when diagnosing a failed test. You normally do
+not need to test that the library itself raises them: your test's purpose is to
+verify your bot's behavior.
 
-response = await tester.tap_button("Continue")
-response.assert_contains("Next step")
-```
+## Complete Example: Registration with FSM
 
-This keeps tests close to how real users interact with the bot.
-
-## Testing FSM State
-
-FSM support is included.
-
-### Verify Current State
-
-```python
-await tester.assert_state(Registration.name)
-```
-
-Verify that no state is active:
-
-```python
-await tester.assert_state(None)
-```
-
-### Verify FSM Data
-
-```python
-await tester.assert_data(name="Bob")
-```
-
-Multiple fields can be checked simultaneously:
-
-```python
-await tester.assert_data(
-    name="Bob",
-    age=25,
-)
-```
-
-The corresponding negative checks are `refute_state()` and `refute_data()`.
-
-## Full Conversation Example
-
-The real power of the library appears when testing complete user journeys.
+The following bot asks for a name and password, stores the data, finishes the
+FSM, and confirms registration.
 
 ```python
 import pytest
-import aiogram
-from aiogram import F
-from aiogram.fsm import context, state
+from aiogram import Dispatcher, F
+from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
     Message,
-    ReplyKeyboardMarkup,
 )
 
 from aiogram_bot_tester import BotTester
 
 
-class Registration(state.StatesGroup):
-    name = state.State()
-    password = state.State()
+class Registration(StatesGroup):
+    name = State()
+    confirmation = State()
+    password = State()
 
 
-router = aiogram.Router()
+dispatcher = Dispatcher()
 
 
-@router.message(aiogram.filters.CommandStart())
-async def cmd_start(
-    message: Message,
-    state: context.FSMContext,
-) -> None:
+@dispatcher.message(CommandStart())
+async def start_registration(message: Message, state: FSMContext) -> None:
+    await state.set_state(Registration.name)
+    await message.answer("What is your name?")
+
+
+@dispatcher.message(Registration.name, F.text)
+async def save_name(message: Message, state: FSMContext) -> None:
+    await state.update_data(name=message.text)
+    await state.set_state(Registration.confirmation)
     await message.answer(
-        "Hello! What's your name?",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Cancel")]
-            ],
-            resize_keyboard=True,
-        ),
-    )
-    await state.set_state(
-        Registration.name
-    )
-
-
-@router.message(
-    Registration.name,
-    aiogram.F.text,
-)
-async def name_chosen(
-    message: Message,
-    state: context.FSMContext,
-) -> None:
-    await message.answer(
-        f"Hi, {message.text}! What about your password?",
+        f"Save the name {message.text}?",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -506,143 +720,129 @@ async def name_chosen(
         ),
     )
 
-    await state.update_data(
-        name=message.text
-    )
 
-    await state.set_state(
-        Registration.password
-    )
-
-
-@router.callback_query(
-    F.data == "continue"
+@dispatcher.callback_query(
+    Registration.confirmation,
+    F.data == "continue",
 )
-async def continue_handler(
+async def request_password(
     callback: CallbackQuery,
+    state: FSMContext,
 ) -> None:
-    await callback.message.answer(
-        "Please send your password."
-    )
+    await state.set_state(Registration.password)
+    await callback.message.answer("Send your password.")
+
+
+@dispatcher.message(Registration.password, F.text)
+async def save_password(message: Message, state: FSMContext) -> None:
+    await state.update_data(password=message.text)
+    data = await state.get_data()
+    await state.clear()
+    await message.answer(f"User {data['name']} has been registered.")
 
 
 @pytest.mark.asyncio
-async def test_registration_flow():
-    tester = BotTester.from_routers(router)
+async def test_registration_flow() -> None:
+    tester = BotTester.from_dispatcher(dispatcher)
 
     response = await tester.start()
-    response.assert_contains("Hello")
-    response.assert_button("Cancel")
+    response.assert_contains("What is your name?")
     await tester.assert_state(Registration.name)
 
     response = await tester.send_message("Bob")
-    response.assert_contains("Hi, Bob!")
+    response.assert_contains("Save the name Bob?")
     response.assert_callback_button(
-        label="Continue",
+        "Continue",
         callback_data="continue",
     )
     await tester.assert_data(name="Bob")
-    await tester.assert_state(Registration.password)
+    await tester.assert_state(Registration.confirmation)
 
     response = await tester.tap_button("Continue")
-    response.assert_contains("Please send your password.")
+    response.assert_contains("Send your password.")
+    await tester.assert_state(Registration.password)
+
+    response = await tester.send_message("secret")
+    response.assert_contains("User Bob has been registered.")
+    await tester.assert_state(None)
+    await tester.refute_data(name="Bob")
+    await tester.refute_data(password="secret")
 ```
 
-## Declarative Testing with `chat()`
+After `state.clear()`, both the FSM state and data have been removed.
 
-For simple conversational flows, the library provides a more concise way to write tests using the `chat()` method. Instead of chaining individual interactions, you describe the entire conversation as a transcript:
+## How to Structure Tests
+
+There is no single "correct" directory structure. Choose one that makes the
+test for a particular behavior easy to find. For example:
+
+```text
+bot/
+├── main.py
+├── routers/
+│   ├── registration.py
+│   └── profile.py
+└── services/
+    └── users.py
+
+tests/
+├── conftest.py
+├── unit/
+│   └── test_users_service.py
+└── flows/
+    ├── test_registration.py
+    └── test_profile.py
+```
+
+- `tests/unit/` tests business rules without Telegram or aiogram;
+- `tests/flows/` tests handlers and user journeys;
+- `conftest.py` stores shared fixtures and fake dependencies.
+
+Example fixture:
+
+```python
+import pytest
+
+from aiogram_bot_tester import BotTester
+from bot.routers.registration import router
+
+
+@pytest.fixture
+def tester() -> BotTester:
+    return BotTester.from_routers(router)
+```
+
+Each test receives a new `BotTester`, a new `Dispatcher`, and new
+`MemoryStorage`, preventing FSM state and data from leaking between tests.
+Routers are deep-copied, so the fixture can be safely reused:
 
 ```python
 @pytest.mark.asyncio
-async def test_registration_flow():
-    tester = BotTester.from_routers(router)
-
-    await tester.chat(
-        """
-        User: /start
-        Bot: Hello! What's your name?
-
-        User: Bob
-        Bot: Hi, Bob! What about your password?
-        """
-    )
-```
-
-### Format Rules
-
-- Each conversation turn consists of exactly two lines: `User:` followed by `Bot:`
-- Turns are separated by blank lines (double newline)
-- The text after `User:` is sent as a user message to the bot
-- The text after `Bot:` is asserted as a substring match against the bot's response using `assert_contains`
-
-### Error Handling
-
-If the transcript format is incorrect, an `InvalidTranscriptError` is raised:
-
-```python
-from aiogram_bot_tester.exceptions import InvalidTranscriptError
-
-with pytest.raises(InvalidTranscriptError):
-    await tester.chat(
-        """
-        User: /start
-        Bot: Hello!
-
-        This line has no User prefix.
-        Bot: Response
-        """
-    )
-```
-
-### When to Use `chat()` vs Step-by-Step API
-
-Use `chat()` when you want a compact, readable description of a conversation flow — similar to how a product spec or user story reads. It's ideal for straightforward linear flows.
-
-Use the step-by-step API (`send_message`, `tap_button`, `in_state`, etc.) when you need intermediate assertions, FSM state checks, or button verification between interactions:
-
-```python
-@pytest.mark.asyncio
-async def test_with_intermediate_checks():
-    tester = BotTester.from_routers(router)
-
+async def test_registration(tester: BotTester) -> None:
     response = await tester.start()
-    response.assert_button("Cancel")  # Check keyboard before proceeding
+    response.assert_contains("What is your name?")
 
-    await tester.chat(
-        """
-        User: Bob
-        Bot: Hi, Bob! What about your password?
-        """
-    )
 
-    await tester.assert_state(Registration.password)  # Check FSM state
+@pytest.mark.asyncio
+async def test_unexpected_message(tester: BotTester) -> None:
+    response = await tester.send_message("???")
+    response.assert_contains("Unknown command")
 ```
 
-## What Not to Test
+## Practical Recommendations and Limitations
 
-When using `aiogram-bot-tester`, prefer testing behavior:
-
-✅ Good:
-
-```python
-response = await tester.start()
-response.assert_contains("Hello")
-```
-
-✅ Good:
-
-```python
-response = await tester.tap_button("Continue")
-response.assert_contains("Next step")
-```
-
-❌ Avoid:
-
-```python
-with pytest.raises(
-    ButtonNotFoundError
-):
-    ...
-```
-
-The goal is to validate what the user experiences, not how the bot internally reaches that result.
+- Test user-visible behavior rather than the name of the handler that ran.
+- Use `response.text` for exact text and `assert_contains()` or
+  `assert_matches()` for more resilient flows.
+- Test cancellation, invalid input, repeated callbacks, and fallback handlers,
+  not only the happy path.
+- Extract computational business logic into unit tests when it improves the
+  design, but do not postpone a useful flow test solely for an "ideal"
+  architecture.
+- Create a new tester for each test to isolate FSM state.
+- Remember that interaction methods return the last response when several
+  `SendMessage` calls occur.
+- `timeout` is an extra wait after processing, not a deadline.
+- `chat()` supports only linear text conversations. Use the step-by-step API for
+  buttons, FSM assertions, and branching.
+- Tests need neither a real Telegram token nor a network connection.

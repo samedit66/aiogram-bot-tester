@@ -1,144 +1,227 @@
 # Руководство по aiogram-bot-tester
 
-## Введение
+`aiogram-bot-tester` — библиотека для офлайн-тестирования Telegram-ботов,
+написанных на aiogram 3.x. Она отправляет в dispatcher искусственные обновления и
+позволяет проверять ответы бота, клавиатуры, callback-кнопки и состояние FSM без
+запуска polling и без обращения к Telegram.
 
-Тестирование — одна из самых важных частей разработки ПО. Telegram-боты не исключение. Хорошо продуманный набор тестов даёт уверенность, что новые фичи не ломают существующий функционал, и позволяет команде двигаться быстрее.
+## Оглавление
 
-В идеальной архитектуре Telegram-бот содержит минимум логики внутри хендлеров. Хендлеры должны только принимать апдейты, вызывать бизнес-сервисы и возвращать ответы. Вся бизнес-логика должна жить в отдельном пакете и покрываться unit-тестами независимо от бота.
+- [Зачем тестировать Telegram-ботов](#зачем-тестировать-telegram-ботов)
+- [Как работает библиотека](#как-работает-библиотека)
+- [Требования и установка](#требования-и-установка)
+- [Первый тест: echo-бот](#первый-тест-echo-бот)
+- [Создание BotTester](#создание-bottester)
+  - [Из Dispatcher](#из-dispatcher)
+  - [Из Router](#из-router)
+  - [Зависимости и middleware](#зависимости-и-middleware)
+  - [Параметры тестового пользователя](#параметры-тестового-пользователя)
+- [Методы BotTester](#методы-bottester)
+  - [send_message](#send_message)
+  - [send_command](#send_command)
+  - [start](#start)
+  - [tap_button](#tap_button)
+  - [in_state и data_has](#in_state-и-data_has)
+  - [assert_state и refute_state](#assert_state-и-refute_state)
+  - [assert_data и refute_data](#assert_data-и-refute_data)
+  - [chat](#chat)
+- [Объект BotMessage](#объект-botmessage)
+  - [Поля, buttons и is_empty](#поля-buttons-и-is_empty)
+  - [Проверка текста](#проверка-текста)
+  - [Проверка кнопок](#проверка-кнопок)
+  - [Проверка клавиатуры](#проверка-клавиатуры)
+- [Исключения](#исключения)
+- [Полный пример: регистрация с FSM](#полный-пример-регистрация-с-fsm)
+- [Как структурировать тесты](#как-структурировать-тесты)
+- [Практические рекомендации и ограничения](#практические-рекомендации-и-ограничения)
 
-Но в реальности всё часто выглядит иначе.
+## Зачем тестировать Telegram-ботов
 
-Многие Telegram-боты развиваются очень быстро, и значительная часть логики постепенно оказывается внутри хендлеров, FSM-сценариев, callback-обработчиков и цепочек роутеров. Да, вынести всё в сервисы архитектурно чище, но если делать это слишком рано, можно легко уйти в оверинжиниринг и затормозить выпуск самого продукта.
+Тесты защищают существующие сценарии от регрессий, упрощают рефакторинг и
+позволяют выпускать изменения увереннее. Для Telegram-бота важно проверять не
+только отдельные функции, но и поведение, которое видит пользователь:
 
-Именно эту проблему и решает **aiogram-bot-tester**.
+- какой ответ приходит на команду или сообщение;
+- какие кнопки показаны и что происходит после нажатия;
+- в какое состояние FSM переходит диалог;
+- какие данные сохраняются между шагами;
+- как бот ведёт себя в полном пользовательском сценарии.
 
-Вместо тестирования отдельных хендлеров в изоляции библиотека позволяет тестировать **полный диалоговый сценарий** бота офлайн и детерминированно.
+В идеальной архитектуре хендлеры принимают обновления, вызывают сервисы и
+формируют ответы, а бизнес-логика находится в отдельных модулях и покрывается
+быстрыми unit-тестами. Это полезный ориентир, но не универсальное правило.
 
-## Чем aiogram-bot-tester отличается от других решений?
+В небольших и быстро развивающихся ботах логика часто находится в хендлерах,
+FSM-переходах и callback-цепочках. Иногда выделение отдельного слоя бизнес-логики
+неактуально или потребует больше времени, чем само изменение. В такой ситуации
+тест реального сценария через хендлеры может быть проще и быстрее. Обычно полезно
+сочетать оба подхода:
 
-Многие библиотеки для тестирования Telegram-ботов сосредоточены на вопросах вроде:
+- сложные вычисления и правила проверять unit-тестами;
+- маршрутизацию, ответы, кнопки, зависимости и FSM проверять через
+  `aiogram-bot-tester`.
 
-> «Выполнился ли этот конкретный хендлер?»
+## Как работает библиотека
 
-или
+Telegram Bot API — HTTP API, через который бот получает обновления и выполняет
+действия: отправляет сообщения, редактирует их, отправляет медиа и так далее. В
+обычном приложении aiogram обращается к этому API от имени бота.
 
-> «Вернул ли этот callback-хендлер ожидаемый результат?»
+`aiogram-bot-tester` не делает реальных сетевых запросов. Библиотека:
 
-**aiogram-bot-tester** смотрит на задачу иначе.
+1. создаёт тестовые объекты `Message`, `CallbackQuery` и `Update`;
+2. передаёт их в `Dispatcher.feed_update()`;
+3. подменяет HTTP-сессию aiogram mock-объектом;
+4. перехватывает вызовы Telegram Bot API;
+5. преобразует вызовы `SendMessage` в объекты `BotMessage`.
 
-Несмотря на то что библиотека построена поверх `aiogram`, с точки зрения автора тестов она специально спроектирована максимально независимо от фреймворка.
+Поэтому тесты работают офлайн и детерминированно: токен настоящего бота не нужен,
+а сообщения не отправляются реальным пользователям.
 
-Ваши тесты не должны зависеть от:
+Сейчас содержимое ответа полноценно захватывается для метода Telegram Bot API
+`SendMessage`: текст, reply-клавиатура, inline callback-кнопки и inline
+URL-кнопки.
 
-- того, какой именно хендлер обработал сообщение;
-- того, какой роутер получил апдейт;
-- количества middleware в цепочке;
-- внутренних деталей реализации.
+> [!WARNING]
+> Пока не поддерживается полноценная проверка отправки фото, видео, документов,
+> стикеров и других медиа, а также редактирования и удаления сообщений и прочих
+> Telegram methods, отличных от `SendMessage`. Не используйте текущий
+> `BotMessage` для утверждений о содержимом таких вызовов.
 
-Вместо этого тест должен выглядеть как реальный диалог:
+Если в ответ на одно действие хендлер вызывает `message.answer()` несколько раз,
+внутренне захватываются все сообщения, но публичный метод возвращает **последний**
+захваченный `BotMessage`.
 
-```text
-Пользователь: /start
-Бот: Привет! Как тебя зовут?
+## Требования и установка
 
-Пользователь: Bob
-Бот: Привет, Bob! Теперь нужен пароль.
+Требования:
 
-Пользователь нажимает «Продолжить»
-Бот: Отправь, пожалуйста, свой пароль.
-```
+- Python 3.10 или новее;
+- aiogram 3.x;
+- pytest;
+- pytest-asyncio.
 
-Тест становится описанием поведения, а не реализации.
-
-## Основная философия
-
-Чтобы тесты оставались разговорными и не зависели от внутреннего устройства приложения, библиотека намеренно вводит некоторые ограничения.
-
-Базовая модель тестирования состоит из следующих действий:
-
-1. Отправить сообщение.
-2. Получить ответ.
-3. Нажать кнопку.
-4. Проверить состояние.
-5. Продолжить диалог.
-
-Благодаря этому тесты читаются почти как лог переписки, оставаясь при этом детерминированными и простыми в поддержке.
-
-## Установка
-
-Установка стабильной версии:
+Установите стабильную версию:
 
 ```bash
 pip install aiogram_bot_tester
 ```
 
-Установка последней dev-версии:
+Или последнюю версию из репозитория:
 
 ```bash
 pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 ```
 
-Для удобства написания асинхронных тестов пакет также устанавливает `pytest-asyncio`.
-
-## Публичный API
-
-### Что действительно стоит использовать
-
-Внутри библиотека состоит из трёх подмодулей:
-
-- `bot_tester`
-- `types`
-- `exceptions`
-
-Но это **внутренние детали реализации**.
-
-Для большинства проектов вам понадобятся только:
-
-- `BotTester` (из подмодуля `bot_tester`)
-- `BotMessage` (из подмодуля `types`)
-
-Всё остальное лучше воспринимать как внутреннюю механику библиотеки.
-
-### Не тестируйте внутренние исключения
-
-Библиотека экспортирует несколько типов исключений, но в первую очередь они предназначены для диагностики и отладки.
-
-Не стоит писать тесты такого вида:
+`pytest-asyncio` устанавливается как зависимость библиотеки. Каждый асинхронный
+тест в этом руководстве декорирован `@pytest.mark.asyncio`:
 
 ```python
-with pytest.raises(ButtonNotFoundError):
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_something() -> None:
     ...
 ```
 
-Задача библиотеки — тестировать поведение бота, а не детали реализации тестового фреймворка.
-
-Фокусируйтесь на **проверке пользовательского сценария**.
-
-## Создание тестера
-
-Существует два способа создать тестер.
-
-### Через роутеры (рекомендуется)
+Импортируйте публичные классы из корня пакета:
 
 ```python
-tester = BotTester.from_routers(router)
+from aiogram_bot_tester import BotMessage, BotTester
 ```
 
-Можно передать сразу несколько роутеров:
+## Первый тест: echo-бот
+
+Начнём с классического варианта: один `Dispatcher` и один хендлер. Echo-бот
+возвращает пользователю полученный текст.
+
+```python
+import pytest
+from aiogram import Dispatcher
+from aiogram.types import Message
+
+from aiogram_bot_tester import BotTester
+
+
+dispatcher = Dispatcher()
+
+
+@dispatcher.message()
+async def echo(message: Message) -> None:
+    await message.answer(message.text or "")
+
+
+@pytest.mark.asyncio
+async def test_echo() -> None:
+    tester = BotTester.from_dispatcher(dispatcher)
+
+    response = await tester.send_message("Привет!")
+
+    assert response.text == "Привет!"
+```
+
+`send_message()` передаёт искусственное сообщение в настоящий pipeline
+dispatcher. Хендлер выполняется как обычно, а `message.answer()` перехватывается
+mock-сессией.
+
+## Создание BotTester
+
+### Из Dispatcher
+
+```python
+BotTester.from_dispatcher(dispatcher, **kwargs)
+```
+
+Параметры:
+
+- `dispatcher` — настроенный `aiogram.Dispatcher`;
+- `**kwargs` — параметры тестового диалога, описанные ниже.
+
+Используйте этот вариант, если приложение уже собирает dispatcher с роутерами,
+middleware, зависимостями и storage:
+
+```python
+tester = BotTester.from_dispatcher(dispatcher)
+```
+
+Метод возвращает новый `BotTester` и сам по себе исключений библиотеки не
+выбрасывает.
+
+### Из Router
+
+```python
+BotTester.from_routers(
+    *routers,
+    dependencies=None,
+    middlewares=None,
+    **kwargs,
+)
+```
+
+Параметры:
+
+- `*routers` — один или несколько `aiogram.Router`;
+- `dependencies` — отображение имён в объекты, доступные хендлерам через
+  dependency injection aiogram;
+- `middlewares` — список inner middleware для событий `message` и
+  `callback_query`;
+- `**kwargs` — параметры тестового диалога.
 
 ```python
 tester = BotTester.from_routers(
     registration_router,
-    admin_router,
     profile_router,
 )
 ```
 
-Обычно это лучший вариант, поскольку большинство приложений на aiogram организованы именно вокруг роутеров.
+Библиотека создаёт `Dispatcher` с `MemoryStorage` и глубоко копирует каждый
+router перед подключением. Благодаря этому один router можно использовать в
+fixture, вызываемой несколькими тестами. Экземпляры middleware не копируются.
 
-#### Передача зависимостей
+### Зависимости и middleware
 
-Тестовые зависимости можно передать напрямую по имени. Aiogram сделает их доступными хендлерам с аргументами под такими же именами:
+Имена из `dependencies` должны совпадать с аргументами хендлера:
 
 ```python
 class FakeRepository:
@@ -147,7 +230,7 @@ class FakeRepository:
 
 
 @router.message(Command("profile"))
-async def profile(message: Message, repository: FakeRepository):
+async def profile(message: Message, repository: FakeRepository) -> None:
     name = await repository.get_name(message.from_user.id)
     await message.answer(name)
 
@@ -156,349 +239,483 @@ tester = BotTester.from_routers(
     router,
     dependencies={"repository": FakeRepository()},
 )
-
-response = await tester.send_message("/profile")
-response.assert_contains("Bob")
 ```
 
-Так можно передавать фейки, моки, репозитории, сессии и сервисы. Состояние того же экземпляра зависимости можно проверить после выполнения диалога.
-
-#### Передача middleware
-
-Middleware по-прежнему можно передавать, когда требуется протестировать их реальное поведение:
+Middleware передаются в порядке выполнения:
 
 ```python
 tester = BotTester.from_routers(
     router,
-    middlewares=[AuthMiddleware()],
+    middlewares=[AuthMiddleware(), LoggingMiddleware()],
 )
 ```
 
-Middleware применяются к сообщениям и callback query в порядке их передачи.
+Для outer middleware и других типов событий настройте dispatcher вручную и
+используйте `from_dispatcher()`.
 
-### Через Dispatcher
+### Параметры тестового пользователя
 
-Для более простых приложений:
+Оба фабричных метода передают `**kwargs` тестовому диалогу:
 
-```python
-tester = BotTester.from_dispatcher(dispatcher)
-```
-
-Подходит для небольших ботов или проектов без разделения на роутеры.
-
-## Рекомендуемая структура тестов
-
-По мере роста проекта организация тестов становится всё важнее.
-
-Хорошая практика — отражать структуру роутеров внутри каталога с тестами.
-
-### Структура бота
-
-```text
-bot/
-├── main.py
-├── routers/
-│   ├── registration.py
-│   ├── profile.py
-│   ├── admin.py
-│   └── support.py
-└── services/
-    ├── users.py
-    └── notifications.py
-```
-
-### Рекомендуемая структура тестов
-
-```text
-tests/
-├── registration/
-│   └── test_registration_flow.py
-├── profile/
-│   └── test_profile_flow.py
-├── admin/
-│   └── test_admin_flow.py
-└── support/
-    └── test_support_flow.py
-```
-
-Так гораздо проще находить тесты, относящиеся к конкретным пользовательским сценариям.
-
-Даже если вы используете один dispatcher, всё равно рекомендуется группировать тесты по пользовательским флоу.
-
-## Отправка сообщений
-
-Самая базовая операция — отправка сообщения от пользователя.
+- `token: str = "42:TEST"` — синтаксически корректный фиктивный токен;
+- `chat_id: int = 1` — идентификатор тестового чата;
+- `user_id: int = 1` — идентификатор тестового пользователя;
+- `user_first_name: str = "Test"` — имя тестового пользователя.
 
 ```python
-response = await tester.send_message("Hello")
+tester = BotTester.from_routers(
+    router,
+    chat_id=100,
+    user_id=42,
+    user_first_name="Alice",
+)
 ```
 
-Результатом всегда будет объект `BotMessage`.
+Настоящий Telegram token передавать не нужно: сетевые запросы замоканы.
+
+## Методы BotTester
+
+Методы, моделирующие действие пользователя и ожидающие ответ бота,
+`send_message()`, `send_command()`, `start()` и `tap_button()`, возвращают
+последний `BotMessage`. Методы-предикаты возвращают `bool`, методы утверждений и
+`chat()` — `None`.
+
+### send_message
 
 ```python
-response.assert_contains("Hello")
+await tester.send_message(text, timeout=None)
 ```
 
-### Отправка команд
+Параметры:
 
-Команды можно отправлять напрямую.
+- `text: str` — текст сообщения пользователя;
+- `timeout: int | None` — сколько секунд подождать **после**
+  `Dispatcher.feed_update()` и до проверки ответа.
 
 ```python
-response = await tester.send_command("help")
+@pytest.mark.asyncio
+async def test_greeting() -> None:
+    response = await tester.send_message("Alice")
+    response.assert_contains("Hello, Alice")
 ```
 
-Поддерживаются и команды с аргументами.
+Если бот не отправил ни одного ответа, выбрасывается `NoBotResponseError`.
+
+`timeout` не является дедлайном и не прерывает медленный хендлер. Сначала
+dispatcher полностью обрабатывает update, затем библиотека выполняет
+`asyncio.sleep(timeout)`, и только после этого проверяет наличие ответа.
+
+### send_command
 
 ```python
-response = await tester.send_command("sum", 1, 2)
+await tester.send_command(command, *args, command_prefix="/")
 ```
 
-Это сгенерирует:
+Параметры:
 
-```text
-/sum 1 2
-```
-
-Пример:
+- `command: str` — имя команды без префикса;
+- `*args: object` — аргументы, каждый из которых преобразуется через `str`;
+- `command_prefix: str` — префикс команды, по умолчанию `/`.
 
 ```python
-response = await tester.send_command("sum", 1, 2)
-assert response.text == "3"
+@pytest.mark.asyncio
+async def test_sum() -> None:
+    response = await tester.send_command("sum", 1, 2)
+    assert response.text == "3"
 ```
 
-## Запуск бота
-
-Так как `/start` используется чаще всего, для него есть отдельный шорткат.
+В бот будет отправлен текст `/sum 1 2`. Можно изменить префикс:
 
 ```python
-response = await tester.start()
+response = await tester.send_command("help", command_prefix="!")
 ```
 
-Эквивалентно:
+Метод вызывает `send_message()` без timeout и выбрасывает `NoBotResponseError`,
+если бот не ответил.
+
+### start
 
 ```python
-response = await tester.send_command("start")
+await tester.start()
 ```
 
-## Проверка ответов бота
+Shortcut для `await tester.send_command("start")`. Параметров нет.
 
-Каждое взаимодействие возвращает объект `BotMessage`.
+```python
+@pytest.mark.asyncio
+async def test_start() -> None:
+    response = await tester.start()
+    response.assert_contains("Welcome")
+```
 
-В тестах предпочтительно использовать встроенные методы `assert_*` и
-`refute_*`: проверки получаются более декларативными, а при падении показывают
-понятное сообщение с ожидаемыми и фактическими значениями. Булевы предикаты
-остаются доступными для составных пользовательских условий.
+Если бот не отвечает на `/start`, выбрасывается `NoBotResponseError`.
+
+### tap_button
+
+```python
+await tester.tap_button(label, timeout=None)
+```
+
+Параметры:
+
+- `label: str` — видимый текст кнопки в последнем сообщении бота;
+- `timeout: int | None` — ожидание после обработки действия, с той же семантикой,
+  что у `send_message()`.
+
+Для reply-кнопки библиотека отправляет её label как обычное сообщение. Для
+callback-кнопки создаётся `CallbackQuery` с соответствующим `callback_data`.
+
+```python
+@pytest.mark.asyncio
+async def test_continue_button() -> None:
+    response = await tester.start()
+    response.assert_button("Продолжить")
+
+    response = await tester.tap_button("Продолжить")
+    response.assert_contains("Следующий шаг")
+```
+
+Исключения:
+
+- `NoBotMessageError` — бот ещё не отправлял сообщений;
+- `ButtonNotFoundError` — кнопка с таким label отсутствует;
+- `AmbiguousButtonError` — в сообщении несколько кнопок с одинаковым label;
+- `UrlButtonInteractionError` — найденная кнопка открывает URL;
+- `NoBotResponseError` — действие обработано, но бот не отправил ответ.
+
+URL-кнопку можно проверить через `BotMessage`, но нельзя «нажать»: открытие
+браузера находится за пределами диалога с ботом.
+
+### in_state и data_has
+
+```python
+await tester.in_state(state)
+await tester.data_has(**kwargs)
+```
+
+`in_state(state)` принимает `aiogram.fsm.state.State` или `None` и возвращает,
+совпадает ли текущее состояние с ожидаемым. `None` означает отсутствие активного
+состояния.
+
+`data_has(**kwargs)` возвращает `True`, только если в FSM data присутствуют все
+переданные пары ключ–значение.
+
+```python
+@pytest.mark.asyncio
+async def test_state_predicates() -> None:
+    assert await tester.in_state(Registration.name)
+    assert await tester.data_has(source="start", attempts=1)
+```
+
+Эти методы не выбрасывают специальных исключений библиотеки.
+
+### assert_state и refute_state
+
+```python
+await tester.assert_state(state)
+await tester.refute_state(state)
+```
+
+Оба метода принимают `State | None`.
+
+- `assert_state()` требует совпадения текущего состояния с переданным;
+- `refute_state()` требует, чтобы состояния не совпадали.
+
+```python
+@pytest.mark.asyncio
+async def test_registration_state() -> None:
+    await tester.assert_state(Registration.name)
+    await tester.refute_state(Registration.password)
+```
+
+При невыполнении условия выбрасывается `AssertionError` с ожидаемым и
+фактическим состоянием.
+
+### assert_data и refute_data
+
+```python
+await tester.assert_data(**kwargs)
+await tester.refute_data(**kwargs)
+```
+
+- `assert_data()` требует присутствия всех переданных пар;
+- `refute_data()` проходит, если хотя бы одна пара отсутствует или имеет другое
+  значение.
+
+```python
+@pytest.mark.asyncio
+async def test_registration_data() -> None:
+    await tester.assert_data(name="Bob", age=25)
+    await tester.refute_data(name="Alice", age=25)
+```
+
+При невыполнении условия выбрасывается `AssertionError`.
+
+### chat
+
+```python
+await tester.chat(transcript)
+```
+
+`transcript: str` описывает линейный разговор. Каждый блок содержит ровно две
+непустые строки, а блоки разделяются пустой строкой:
+
+```python
+@pytest.mark.asyncio
+async def test_greeting_chat() -> None:
+    await tester.chat(
+        """
+        User: /start
+        Bot: Как вас зовут?
+
+        User: Bob
+        Bot: Привет, Bob!
+        """
+    )
+```
+
+Текст после `User:` отправляется через `send_message()`. Текст после `Bot:`
+проверяется как подстрока через `BotMessage.assert_contains()`.
+
+Границы `chat()`:
+
+- только линейные пары текстовых сообщений;
+- нельзя описывать нажатия кнопок;
+- нельзя помещать промежуточные проверки FSM или клавиатуры внутрь transcript;
+- каждый ответ проверяется только по вхождению текста, а не по точному равенству.
+
+Для кнопок, FSM и сложных ветвлений сочетайте `chat()` с пошаговым API или
+используйте только пошаговый API.
+
+Исключения:
+
+- `InvalidTranscriptError` — неверное число строк или отсутствует префикс
+  `User:`/`Bot:`;
+- `NoBotResponseError` — бот не ответил на одно из сообщений;
+- `AssertionError` — ответ не содержит ожидаемый текст.
+
+## Объект BotMessage
+
+`BotMessage` — неизменяемый dataclass, представляющий захваченный `SendMessage`.
+Обычно его не создают вручную: он возвращается методами `BotTester`.
+
+### Поля, buttons и is_empty
+
+Публичные поля:
+
+- `text: str | None` — текст ответа;
+- `keyboard: list[list[Button]]` — строки захваченной клавиатуры.
+
+Кнопки представлены типами:
+
+- `Button(label)` — reply-кнопка;
+- `CallbackButton(label, data)` — inline callback-кнопка;
+- `UrlButton(label, url)` — inline URL-кнопка.
+
+`message.buttons` — property, разворачивающий матрицу `keyboard` в плоский список.
+`message.is_empty()` возвращает `True`, если у сообщения нет непустого текста и
+клавиатуры.
+
+```python
+assert response.text == "Выберите действие"
+assert [button.label for button in response.buttons] == ["Да", "Нет"]
+assert not response.is_empty()
+```
+
+Эти операции специальных исключений не выбрасывают.
 
 ### Проверка текста
 
 ```python
-response.assert_contains("Hello")
+message.contains(text, *texts) -> bool
+message.matches(pattern, *patterns) -> bool
+message.assert_contains(text, *texts) -> None
+message.refute_contains(text, *texts) -> None
+message.assert_matches(pattern, *patterns) -> None
+message.refute_matches(pattern, *patterns) -> None
 ```
 
-Можно передать несколько вариантов:
+`contains()` возвращает `True`, если текст сообщения содержит хотя бы одну
+переданную строку. `matches()` использует `re.search()` и принимает строки или
+скомпилированные `re.Pattern`.
 
 ```python
-response.assert_contains(
-    "Hello",
-    "Hi",
-    "Welcome",
-)
+assert response.contains("Hello", "Welcome")
+assert response.matches(r"Order #\d+")
 ```
 
-Если передано несколько значений, проверка проходит, когда ответ содержит хотя
-бы одно из них. `refute_contains()` проверяет, что ни одного значения нет:
+Assert-варианты требуют совпадение хотя бы с одним значением. Refute-варианты
+требуют, чтобы не совпало ни одно:
 
 ```python
-response.refute_contains("Error", "Exception")
+response.assert_contains("Hello", "Welcome")
+response.refute_contains("Error", "Traceback")
+response.assert_matches(r"Order #\d+", r"Invoice #\d+")
+response.refute_matches(r"failed", r"exception")
 ```
 
-Для точного сравнения используйте публичный атрибут `text`. В таком виде pytest
-также покажет стандартный diff строк:
+Каждый метод требует минимум одну строку или pattern. Булевы методы возвращают
+`False`, если `text is None`. Assert/refute-методы выбрасывают `AssertionError`
+при невыполнении условия.
+
+Для точного сравнения используйте поле `text`:
 
 ```python
 assert response.text == "Hello!"
 ```
 
-### Использование регулярных выражений
+### Проверка кнопок
 
 ```python
-response.assert_matches(r"\d+")
+message.has_button(label) -> bool
+message.assert_button(label) -> None
+message.refute_button(label) -> None
 ```
 
-Полезно для динамического контента:
+Эти методы проверяют label кнопки любого типа:
 
 ```python
-response.assert_matches(
-    r"Order #\d+",
-    r"Invoice #\d+",
+assert response.has_button("Продолжить")
+response.assert_button("Продолжить")
+response.refute_button("Удалить")
+```
+
+Для URL-кнопок:
+
+```python
+message.has_url_button(label, *, url) -> bool
+message.assert_url_button(label, *, url) -> None
+message.refute_url_button(label, *, url) -> None
+```
+
+Оба параметра должны совпасть; `url` является keyword-only:
+
+```python
+assert response.has_url_button(
+    "Документация",
+    url="https://example.com/docs",
 )
-```
-
-Как и `assert_contains()`, несколько паттернов используют семантику «хотя бы
-один», а поиск выполняется через `re.search()`. `refute_matches()` проверяет,
-что ни один паттерн не встречается:
-
-```python
-response.refute_matches(r"Traceback", r"Exception")
-```
-
-### Работа с кнопками
-
-Кнопки являются полноценной частью диалогового тестирования.
-
-#### Проверка наличия кнопки
-
-```python
-response.assert_button("Continue")
-```
-
-#### Проверка callback-кнопки
-
-```python
-response.assert_callback_button(
-    "Continue",
-    callback_data="continue",
-)
-```
-
-#### Проверка URL-кнопки
-
-```python
 response.assert_url_button(
-    "Google",
-    url="https://google.com",
+    "Документация",
+    url="https://example.com/docs",
+)
+response.refute_url_button(
+    "Удалить",
+    url="https://example.com/delete",
 )
 ```
 
-Помните, что URL-кнопки можно проверять, но **нажимать их нельзя**.
-
-#### Проверка всей раскладки клавиатуры
+Для callback-кнопок:
 
 ```python
-response.assert_keyboard([
-    ["Yes", "No"],
-    ["Cancel"],
-])
+message.has_callback_button(label, *, callback_data) -> bool
+message.assert_callback_button(label, *, callback_data) -> None
+message.refute_callback_button(label, *, callback_data) -> None
 ```
 
-Полезно, когда важно именно расположение кнопок.
-
-#### Взаимодействие с кнопками
-
-Библиотека поддерживает работу как с reply-кнопками, так и с callback-кнопками.
+`callback_data` является keyword-only, label и данные должны совпасть:
 
 ```python
-response = await tester.tap_button("Continue")
+assert response.has_callback_button("Да", callback_data="confirm")
+response.assert_callback_button("Да", callback_data="confirm")
+response.refute_callback_button("Нет", callback_data="confirm")
 ```
 
-Пример сценария:
+Булевы методы возвращают `True` или `False`. Assert/refute-методы выбрасывают
+`AssertionError` при невыполнении условия.
+
+### Проверка клавиатуры
 
 ```python
-response = await tester.start()
-response.assert_button("Continue")
-
-response = await tester.tap_button("Continue")
-response.assert_contains("Next step")
+message.has_keyboard(keyboard) -> bool
+message.assert_keyboard(keyboard) -> None
+message.refute_keyboard(keyboard) -> None
 ```
 
-Так тест остаётся максимально близким к реальному поведению пользователя.
-
-## Тестирование FSM
-
-Поддержка FSM встроена в библиотеку.
-
-### Проверка текущего состояния
+`keyboard: list[list[str]]` — матрица label. Учитываются все строки, порядок и
+наличие всех кнопок:
 
 ```python
-await tester.assert_state(Registration.name)
+expected = [
+    ["Да", "Нет"],
+    ["Отмена"],
+]
+
+assert response.has_keyboard(expected)
+response.assert_keyboard(expected)
+response.refute_keyboard([["Удалить"]])
 ```
 
-Проверка отсутствия активного состояния:
+`has_keyboard()` возвращает `bool`; assert/refute-варианты выбрасывают
+`AssertionError` при невыполнении условия.
 
-```python
-await tester.assert_state(None)
-```
+## Исключения
 
-### Проверка данных FSM
+Все специальные исключения наследуются от `BotTesterError`:
 
-```python
-await tester.assert_data(name="Bob")
-```
+| Исключение | Когда возникает |
+|---|---|
+| `NoBotMessageError` | действие требует предыдущего сообщения бота |
+| `NoBotResponseError` | бот не отправил ответ на действие |
+| `ButtonNotFoundError` | кнопка с указанным label не найдена |
+| `AmbiguousButtonError` | найдено несколько кнопок с одинаковым label |
+| `UrlButtonInteractionError` | предпринята попытка нажать URL-кнопку |
+| `InvalidTranscriptError` | transcript для `chat()` имеет неверный формат |
 
-Можно проверять сразу несколько полей:
+Методы `assert_*` и `refute_*` используют стандартный `AssertionError`, чтобы
+pytest показывал обычное падение проверки.
 
-```python
-await tester.assert_data(
-    name="Bob",
-    age=25,
-)
-```
+Исключения полезно знать для диагностики теста. Обычно не требуется отдельно
+тестировать, что сама библиотека выбрасывает их: цель теста — проверять поведение
+вашего бота.
 
-Для отрицательных проверок предусмотрены `refute_state()` и `refute_data()`.
+## Полный пример: регистрация с FSM
 
-## Полный пример диалога
-
-Настоящая сила библиотеки раскрывается при тестировании полноценных пользовательских сценариев.
+Следующий бот запрашивает имя и пароль, сохраняет данные, завершает FSM и
+подтверждает регистрацию.
 
 ```python
 import pytest
-import aiogram
-from aiogram import F
-from aiogram.fsm import context, state
+from aiogram import Dispatcher, F
+from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
     Message,
-    ReplyKeyboardMarkup,
 )
 
 from aiogram_bot_tester import BotTester
 
 
-class Registration(state.StatesGroup):
-    name = state.State()
-    password = state.State()
+class Registration(StatesGroup):
+    name = State()
+    confirmation = State()
+    password = State()
 
 
-router = aiogram.Router()
+dispatcher = Dispatcher()
 
 
-@router.message(aiogram.filters.CommandStart())
-async def cmd_start(
-    message: Message,
-    state: context.FSMContext,
-) -> None:
+@dispatcher.message(CommandStart())
+async def start_registration(message: Message, state: FSMContext) -> None:
+    await state.set_state(Registration.name)
+    await message.answer("Как вас зовут?")
+
+
+@dispatcher.message(Registration.name, F.text)
+async def save_name(message: Message, state: FSMContext) -> None:
+    await state.update_data(name=message.text)
+    await state.set_state(Registration.confirmation)
     await message.answer(
-        "Hello! What's your name?",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Cancel")]
-            ],
-            resize_keyboard=True,
-        ),
-    )
-    await state.set_state(
-        Registration.name
-    )
-
-
-@router.message(
-    Registration.name,
-    aiogram.F.text,
-)
-async def name_chosen(
-    message: Message,
-    state: context.FSMContext,
-) -> None:
-    await message.answer(
-        f"Hi, {message.text}! What about your password?",
+        f"Сохранить имя {message.text}?",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="Continue",
+                        text="Продолжить",
                         callback_data="continue",
                     )
                 ]
@@ -506,143 +723,128 @@ async def name_chosen(
         ),
     )
 
-    await state.update_data(
-        name=message.text
-    )
 
-    await state.set_state(
-        Registration.password
-    )
-
-
-@router.callback_query(
-    F.data == "continue"
+@dispatcher.callback_query(
+    Registration.confirmation,
+    F.data == "continue",
 )
-async def continue_handler(
+async def request_password(
     callback: CallbackQuery,
+    state: FSMContext,
 ) -> None:
-    await callback.message.answer(
-        "Please send your password."
-    )
+    await state.set_state(Registration.password)
+    await callback.message.answer("Отправьте пароль.")
+
+
+@dispatcher.message(Registration.password, F.text)
+async def save_password(message: Message, state: FSMContext) -> None:
+    await state.update_data(password=message.text)
+    data = await state.get_data()
+    await state.clear()
+    await message.answer(f"Пользователь {data['name']} зарегистрирован.")
 
 
 @pytest.mark.asyncio
-async def test_registration_flow():
-    tester = BotTester.from_routers(router)
+async def test_registration_flow() -> None:
+    tester = BotTester.from_dispatcher(dispatcher)
 
     response = await tester.start()
-    response.assert_contains("Hello")
-    response.assert_button("Cancel")
+    response.assert_contains("Как вас зовут?")
     await tester.assert_state(Registration.name)
 
     response = await tester.send_message("Bob")
-    response.assert_contains("Hi, Bob!")
+    response.assert_contains("Сохранить имя Bob?")
     response.assert_callback_button(
-        label="Continue",
+        "Продолжить",
         callback_data="continue",
     )
     await tester.assert_data(name="Bob")
+    await tester.assert_state(Registration.confirmation)
+
+    response = await tester.tap_button("Продолжить")
+    response.assert_contains("Отправьте пароль.")
     await tester.assert_state(Registration.password)
 
-    response = await tester.tap_button("Continue")
-    response.assert_contains("Please send your password.")
+    response = await tester.send_message("secret")
+    response.assert_contains("Пользователь Bob зарегистрирован.")
+    await tester.assert_state(None)
+    await tester.refute_data(name="Bob")
+    await tester.refute_data(password="secret")
 ```
 
-## Декларативное тестирование через `chat()`
+После `state.clear()` и состояние FSM, и сохранённые данные удалены.
 
-Для простых диалоговых сценариев библиотека предоставляет более лаконичный способ написания тестов — метод `chat()`. Вместо цепочки отдельных взаимодействий вы описываете весь разговор как транскрипт:
+## Как структурировать тесты
+
+Единственной «правильной» структуры нет. Выбирайте структуру, в которой легко
+найти тест конкретного поведения. Например:
+
+```text
+bot/
+├── main.py
+├── routers/
+│   ├── registration.py
+│   └── profile.py
+└── services/
+    └── users.py
+
+tests/
+├── conftest.py
+├── unit/
+│   └── test_users_service.py
+└── flows/
+    ├── test_registration.py
+    └── test_profile.py
+```
+
+- `tests/unit/` проверяет бизнес-правила без Telegram и aiogram;
+- `tests/flows/` проверяет хендлеры и пользовательские сценарии;
+- `conftest.py` хранит общие fixture и fake-зависимости.
+
+Пример fixture:
+
+```python
+import pytest
+
+from aiogram_bot_tester import BotTester
+from bot.routers.registration import router
+
+
+@pytest.fixture
+def tester() -> BotTester:
+    return BotTester.from_routers(router)
+```
+
+Каждый тест получает новый `BotTester`, новый `Dispatcher` и новый
+`MemoryStorage`. Это предотвращает перенос FSM state и data между тестами.
+Роутеры глубоко копируются, поэтому fixture можно безопасно переиспользовать:
 
 ```python
 @pytest.mark.asyncio
-async def test_registration_flow():
-    tester = BotTester.from_routers(router)
-
-    await tester.chat(
-        """
-        User: /start
-        Bot: Привет! Как тебя зовут?
-
-        User: Bob
-        Bot: Привет, Bob! Теперь нужен пароль.
-        """
-    )
-```
-
-### Правила формата
-
-- Каждый оборот диалога состоит ровно из двух строк: `User:` затем `Bot:`
-- Обороты разделяются пустыми строками (двойной перевод строки)
-- Текст после `User:` отправляется как сообщение пользователя боту
-- Текст после `Bot:` проверяется как подстрока в ответе бота через `assert_contains`
-
-### Обработка ошибок
-
-Если формат транскрипта неверен, будет выброшено исключение `InvalidTranscriptError`:
-
-```python
-from aiogram_bot_tester.exceptions import InvalidTranscriptError
-
-with pytest.raises(InvalidTranscriptError):
-    await tester.chat(
-        """
-        User: /start
-        Bot: Привет!
-
-        Эта строка без префикса User.
-        Bot: Ответ
-        """
-    )
-```
-
-### Когда использовать `chat()`, а не пошаговый API
-
-Используйте `chat()`, когда хотите получить компактное, читаемое описание диалога — похоже на то, как читается спецификация продукта или пользовательская история. Идеально подходит для простых линейных сценариев.
-
-Используйте пошаговый API (`send_message`, `tap_button`, `in_state` и т.д.), когда нужны промежуточные проверки, проверка состояния FSM или верификация кнопок между взаимодействиями:
-
-```python
-@pytest.mark.asyncio
-async def test_with_intermediate_checks():
-    tester = BotTester.from_routers(router)
-
+async def test_registration(tester: BotTester) -> None:
     response = await tester.start()
-    response.assert_button("Cancel")  # Проверяем клавиатуру перед продолжением
+    response.assert_contains("Как вас зовут?")
 
-    await tester.chat(
-        """
-        User: Bob
-        Bot: Привет, Bob! Теперь нужен пароль.
-        """
-    )
 
-    await tester.assert_state(Registration.password)  # Проверяем состояние FSM
+@pytest.mark.asyncio
+async def test_unexpected_message(tester: BotTester) -> None:
+    response = await tester.send_message("???")
+    response.assert_contains("Неизвестная команда")
 ```
 
-## Что не стоит тестировать
+## Практические рекомендации и ограничения
 
-При использовании `aiogram-bot-tester` старайтесь тестировать поведение.
-
-✅ Хорошо:
-
-```python
-response = await tester.start()
-response.assert_contains("Hello")
-```
-
-✅ Хорошо:
-
-```python
-response = await tester.tap_button("Continue")
-response.assert_contains("Next step")
-```
-
-❌ Избегайте:
-
-```python
-with pytest.raises(
-    ButtonNotFoundError
-):
-    ...
-```
-
-Цель — проверить то, что видит и ощущает пользователь, а не внутренний путь, которым бот пришёл к результату.
+- Проверяйте пользовательское поведение, а не имя сработавшего хендлера.
+- Для точного текста используйте `response.text`, для устойчивых сценариев —
+  `assert_contains()` или `assert_matches()`.
+- Проверяйте не только успешный путь, но и отмену, неверный ввод, повторные
+  callback-запросы и fallback-хендлеры.
+- Выделяйте вычислительную бизнес-логику в unit-тесты, когда это упрощает дизайн,
+  но не откладывайте полезный flow-тест только ради «идеальной» архитектуры.
+- Создавайте новый tester для каждого теста, чтобы изолировать FSM.
+- Помните: методы взаимодействия возвращают последний ответ при нескольких
+  `SendMessage`.
+- `timeout` — дополнительное ожидание после обработки, а не дедлайн.
+- `chat()` подходит только для линейных текстовых диалогов. Для кнопок, FSM и
+  ветвлений используйте пошаговый API.
+- Настоящий Telegram token и сетевое соединение для тестов не нужны.
