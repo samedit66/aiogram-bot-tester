@@ -261,6 +261,16 @@ class BotTester:
             dispatcher: Configured aiogram dispatcher used to process test updates.
             **kwargs: Arguments forwarded to :class:`BotConversation`, plus the
                 optional ``command_prefix`` argument.
+
+        Example:
+
+        ```python
+        from aiogram import Dispatcher
+        from aiogram_bot_tester import BotTester
+
+        dispatcher = Dispatcher()
+        tester = BotTester.from_dispatcher(dispatcher)
+        ```
         """
         command_prefix = kwargs.pop("command_prefix", "/")
         bot_conversation = BotConversation(dispatcher=dispatcher, **kwargs)
@@ -291,6 +301,20 @@ class BotTester:
                 dispatcher directly and use :meth:`from_dispatcher`.
             **kwargs: Arguments forwarded to :class:`BotConversation`, plus the
                 optional ``command_prefix`` argument.
+
+        Example:
+
+        ```python
+        from aiogram import Router
+        from aiogram_bot_tester import BotTester
+
+        router = Router()
+        repository = object()
+        tester = BotTester.from_routers(
+            router,
+            dependencies={"repository": repository},
+        )
+        ```
         """
         dispatcher = aio.Dispatcher(storage=fsm_memory.MemoryStorage())
         dispatcher.workflow_data.update(dependencies or {})
@@ -374,7 +398,10 @@ class BotTester:
     ) -> abt_types.BotMessage:
         """
         Taps a button attached to the last sent by the bot message.
-        If the button does not exist, raises `ValueError`.
+        Raises `NoBotMessageError` if the bot has not sent a message,
+        `ButtonNotFoundError` if no button has the specified label,
+        `AmbiguousButtonError` if multiple buttons have that label, or
+        `UrlButtonInteractionError` if the matching button opens a URL.
 
         Example:
 
@@ -422,7 +449,9 @@ class BotTester:
         Example:
 
         ```python
-        class Form:
+        from aiogram.fsm.state import State, StatesGroup
+
+        class Form(StatesGroup):
             name = State()
 
         is_in_state = await tester.in_state(Form.name)
@@ -444,7 +473,21 @@ class BotTester:
         return all(key in data and data[key] == value for key, value in kwargs.items())
 
     async def assert_state(self, state: fsm_state.State | None) -> None:
-        """Asserts that the bot is in the specified FSM state."""
+        """
+        Asserts that the bot is in the specified FSM state.
+        Pass `None` to assert that no FSM state is active.
+
+        Example:
+
+        ```python
+        from aiogram.fsm.state import State, StatesGroup
+
+        class Form(StatesGroup):
+            name = State()
+
+        await tester.assert_state(Form.name)
+        ```
+        """
         if not await self.in_state(state):
             actual = await self.bot_conversation.get_state()
             expected = state.state if state is not None else None
@@ -453,7 +496,21 @@ class BotTester:
             )
 
     async def refute_state(self, state: fsm_state.State | None) -> None:
-        """Asserts that the bot is not in the specified FSM state."""
+        """
+        Asserts that the bot is not in the specified FSM state.
+        Pass `None` to assert that an FSM state is active.
+
+        Example:
+
+        ```python
+        from aiogram.fsm.state import State, StatesGroup
+
+        class Form(StatesGroup):
+            name = State()
+
+        await tester.refute_state(Form.name)
+        ```
+        """
         if await self.in_state(state):
             expected = state.state if state is not None else None
             raise AssertionError(
@@ -461,7 +518,16 @@ class BotTester:
             )
 
     async def assert_data(self, **kwargs: Any) -> None:
-        """Asserts that the FSM data contains all specified key-value pairs."""
+        """
+        Asserts that the FSM data contains all specified key-value pairs.
+        Additional values stored in the FSM context are ignored.
+
+        Example:
+
+        ```python
+        await tester.assert_data(name="Bob", age=30)
+        ```
+        """
         if not await self.data_has(**kwargs):
             actual = await self.bot_conversation.get_data()
             raise AssertionError(
@@ -469,7 +535,16 @@ class BotTester:
             )
 
     async def refute_data(self, **kwargs: Any) -> None:
-        """Asserts that the FSM data does not contain all specified pairs."""
+        """
+        Asserts that the FSM data does not contain all specified pairs.
+        The assertion succeeds if at least one pair is absent or has another value.
+
+        Example:
+
+        ```python
+        await tester.refute_data(name="Alice", age=30)
+        ```
+        """
         if await self.data_has(**kwargs):
             actual = await self.bot_conversation.get_data()
             raise AssertionError(

@@ -33,9 +33,15 @@ class BotMessage:
         Example:
 
         ```python
-        keyboard = [[CallbackButton("Yes"), CallbackButton("No")], [CallbackButton("Cancel")]]
+        keyboard = [
+            [
+                CallbackButton("Yes", data="yes"),
+                CallbackButton("No", data="no"),
+            ],
+            [CallbackButton("Cancel", data="cancel")],
+        ]
         message = BotMessage("Agree?", keyboard)
-        print(message.buttons()) # A list of callback buttons
+        print(message.buttons)  # A list of callback buttons
         ```
         """
         return list(itertools.chain.from_iterable(self.keyboard))
@@ -43,8 +49,8 @@ class BotMessage:
     def is_empty(self) -> bool:
         """
         Checks whether a message is empty.
-        A message is empty when it contains no text (`message_text` is `None`) and
-        no keyboard (`attached_keyboard` is an empty `list`).
+        A message is empty when it contains no text (`text` is `None`) and
+        no keyboard (`keyboard` is an empty `list`).
 
         Example:
 
@@ -102,7 +108,15 @@ class BotMessage:
         )
 
     def assert_contains(self, text: str, *texts: str) -> None:
-        """Asserts that the message contains at least one of the specified texts."""
+        """
+        Asserts that the message contains at least one of the specified texts.
+
+        Example:
+
+        ```python
+        message.assert_contains("Hello", "Welcome")
+        ```
+        """
         expected = (text, *texts)
         if not self.contains(*expected):
             target = repr(text) if not texts else f"any of {expected!r}"
@@ -111,7 +125,15 @@ class BotMessage:
             )
 
     def refute_contains(self, text: str, *texts: str) -> None:
-        """Asserts that the message contains none of the specified texts."""
+        """
+        Asserts that the message contains none of the specified texts.
+
+        Example:
+
+        ```python
+        message.refute_contains("Error", "Failed")
+        ```
+        """
         expected = (text, *texts)
         if self.contains(*expected):
             found = tuple(
@@ -128,7 +150,16 @@ class BotMessage:
         pattern: str | re.Pattern[str],
         *patterns: str | re.Pattern[str],
     ) -> None:
-        """Asserts that the message matches at least one specified expression."""
+        """
+        Asserts that the message matches at least one specified expression.
+        Matching is backed by `re.search`.
+
+        Example:
+
+        ```python
+        message.assert_matches(r"Order #\\d+", r"Request #\\d+")
+        ```
+        """
         expected = (pattern, *patterns)
         if not self.matches(*expected):
             target = repr(pattern) if not patterns else f"any of {expected!r}"
@@ -141,7 +172,16 @@ class BotMessage:
         pattern: str | re.Pattern[str],
         *patterns: str | re.Pattern[str],
     ) -> None:
-        """Asserts that the message matches none of the specified expressions."""
+        """
+        Asserts that the message matches none of the specified expressions.
+        Matching is backed by `re.search`.
+
+        Example:
+
+        ```python
+        message.refute_matches(r"error", r"failed")
+        ```
+        """
         expected = (pattern, *patterns)
         matched = tuple(
             item
@@ -169,7 +209,16 @@ class BotMessage:
         return any(label == button.label for button in self.buttons)
 
     def assert_button(self, label: str) -> None:
-        """Asserts that the message has a button with the specified label."""
+        """
+        Asserts that the message has a button with the specified label.
+        Reply, callback, and URL buttons are all considered.
+
+        Example:
+
+        ```python
+        message.assert_button("Continue")
+        ```
+        """
         if not self.has_button(label):
             labels = [button.label for button in self.buttons]
             raise AssertionError(
@@ -178,7 +227,16 @@ class BotMessage:
             )
 
     def refute_button(self, label: str) -> None:
-        """Asserts that the message has no button with the specified label."""
+        """
+        Asserts that the message has no button with the specified label.
+        Reply, callback, and URL buttons are all considered.
+
+        Example:
+
+        ```python
+        message.refute_button("Cancel")
+        ```
+        """
         if self.has_button(label):
             raise AssertionError(
                 f"Expected message not to have button {label!r}, but it was present."
@@ -201,7 +259,18 @@ class BotMessage:
         )
 
     def assert_url_button(self, label: str, *, url: str) -> None:
-        """Asserts that the specified URL button is attached."""
+        """
+        Asserts that a URL button with the specified label and URL is attached.
+
+        Example:
+
+        ```python
+        message.assert_url_button(
+            "Open documentation",
+            url="https://example.com/docs",
+        )
+        ```
+        """
         if not self.has_url_button(label, url=url):
             available = [
                 (button.label, button.url)
@@ -214,7 +283,18 @@ class BotMessage:
             )
 
     def refute_url_button(self, label: str, *, url: str) -> None:
-        """Asserts that the specified URL button is not attached."""
+        """
+        Asserts that a URL button with the specified label and URL is not attached.
+
+        Example:
+
+        ```python
+        message.refute_url_button(
+            "Delete account",
+            url="https://example.com/delete",
+        )
+        ```
+        """
         if self.has_url_button(label, url=url):
             raise AssertionError(
                 f"Expected message not to have URL button {label!r} with url={url!r}, "
@@ -238,7 +318,16 @@ class BotMessage:
         )
 
     def assert_callback_button(self, label: str, *, callback_data: str) -> None:
-        """Asserts that the specified callback button is attached."""
+        """
+        Asserts that a callback button with the specified data is attached.
+        Both the button label and callback data must match.
+
+        Example:
+
+        ```python
+        message.assert_callback_button("Confirm", callback_data="confirm")
+        ```
+        """
         if not self.has_callback_button(label, callback_data=callback_data):
             available = [
                 (button.label, button.data)
@@ -252,7 +341,16 @@ class BotMessage:
             )
 
     def refute_callback_button(self, label: str, *, callback_data: str) -> None:
-        """Asserts that the specified callback button is not attached."""
+        """
+        Asserts that a callback button with the specified data is not attached.
+        Both the button label and callback data must match.
+
+        Example:
+
+        ```python
+        message.refute_callback_button("Cancel", callback_data="cancel")
+        ```
+        """
         if self.has_callback_button(label, callback_data=callback_data):
             raise AssertionError(
                 "Expected message not to have callback button "
@@ -281,13 +379,36 @@ class BotMessage:
         return keyboard == [[button.label for button in row] for row in self.keyboard]
 
     def assert_keyboard(self, keyboard: list[list[str]]) -> None:
-        """Asserts that the complete keyboard layout matches the expected layout."""
+        """
+        Asserts that the complete keyboard layout matches the expected layout.
+        Button labels, rows, and ordering must match exactly.
+
+        Example:
+
+        ```python
+        message.assert_keyboard([
+            ["Yes", "No"],
+            ["Cancel"],
+        ])
+        ```
+        """
         actual = [[button.label for button in row] for row in self.keyboard]
         if not self.has_keyboard(keyboard):
             raise AssertionError(f"Expected keyboard {keyboard!r}, but got {actual!r}.")
 
     def refute_keyboard(self, keyboard: list[list[str]]) -> None:
-        """Asserts that the complete keyboard layout differs from the given layout."""
+        """
+        Asserts that the complete keyboard layout differs from the given layout.
+
+        Example:
+
+        ```python
+        message.refute_keyboard([
+            ["Delete"],
+            ["Cancel"],
+        ])
+        ```
+        """
         if self.has_keyboard(keyboard):
             raise AssertionError(
                 f"Expected keyboard not to equal {keyboard!r}, but it matched exactly."
