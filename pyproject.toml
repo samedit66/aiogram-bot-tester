@@ -1,12 +1,19 @@
 [project]
 name = "aiogram_bot_tester"
 version = "2.2.0"
-description = "Test your Telegram bots easily"
+description = "Your missing test toolkit for Telegram bots."
 readme = "README.md"
 requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+    { name = "samedit66", email = "samedit66@yandex.ru" },
+]
+keywords = ["aiogram", "telegram", "testing", "pytest", "bot"]
 classifiers = [
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing",
     "Framework :: Pytest",
     "Typing :: Typed",
 ]
@@ -17,7 +24,9 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/samedit66/aiogram-bot-tester"
+Repository = "https://github.com/samedit66/aiogram-bot-tester"
 Issues = "https://github.com/samedit66/aiogram-bot-tester/issues"
+Changelog = "https://github.com/samedit66/aiogram-bot-tester/releases"
 
 [dependency-groups]
 dev = [
