@@ -3,24 +3,31 @@ from datetime import datetime, timezone
 
 import pytest
 from aiogram import F, Router
-from aiogram.methods import SendPhoto
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
     Chat,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InputMediaDocument,
     InputMediaPhoto,
     InputMediaVideo,
     Message,
-    MessageEntity,
-    PhotoSize,
     Update,
     User,
 )
 
-from aiogram_bot_tester import BotMessage, BotTester
+from aiogram_bot_tester import (
+    ApiCall,
+    BotMessage,
+    BotTester,
+    CaptionEntity,
+    Document,
+    Photo,
+    Sticker,
+    Upload,
+    Video,
+    Voice,
+)
 from aiogram_bot_tester.exceptions import NoBotResponseError
 
 
@@ -117,8 +124,9 @@ async def test_invalid_media_is_rejected_before_dispatch(kind, kwargs):
     async def handle():
         pytest.fail("invalid media was dispatched")
 
+    tester = BotTester.from_routers(router)
     with pytest.raises(ValueError):
-        await getattr(BotTester.from_routers(router), f"send_{kind}")(**kwargs)
+        await getattr(tester, f"send_{kind}")(**kwargs)
 
 
 @pytest.mark.asyncio
@@ -134,13 +142,13 @@ async def test_album_dispatches_each_item_and_returns_all_responses():
 
     tester = BotTester.from_routers(router)
     items = [
-        InputMediaPhoto(
-            media="first",
+        Photo(
+            file_id="first",
             caption="One",
-            caption_entities=[MessageEntity(type="bold", offset=0, length=3)],
+            caption_entities=(CaptionEntity(type="bold", offset=0, length=3),),
         ),
-        InputMediaVideo(media="second", width=100, duration=0),
-        InputMediaPhoto(media="third", caption="Three"),
+        Video(file_id="second", width=100, duration=0),
+        Photo(file_id="third", caption="Three"),
     ]
     responses = await tester.send_album(items)
     assert tuple(response.text for response in responses) == ("One", "Three")
@@ -156,12 +164,7 @@ async def test_album_dispatches_each_item_and_returns_all_responses():
         received[0].media_group_id
     }
     assert len({message.message_id for message in received}) == 3
-    assert (
-        await tester.send_album(
-            [InputMediaDocument(media="a"), InputMediaDocument(media="b")]
-        )
-        == ()
-    )
+    assert await tester.send_album([Document(file_id="a"), Document(file_id="b")]) == ()
     assert received[-1].document.file_id == "b"
     assert received[-1].media_group_id != received[0].media_group_id
 
@@ -170,15 +173,11 @@ async def test_album_dispatches_each_item_and_returns_all_responses():
 @pytest.mark.parametrize(
     "items",
     [
-        [InputMediaPhoto(media="a")],
-        [InputMediaPhoto(media="a")] * 11,
-        [InputMediaPhoto(media="a"), InputMediaDocument(media="b")],
-        [InputMediaPhoto(media="a"), InputMediaPhoto(media="https://example.com/a")],
-        [
-            InputMediaPhoto(media="a"),
-            InputMediaPhoto(media=BufferedInputFile(b"x", "x.jpg")),
-        ],
-        [InputMediaPhoto(media="a"), InputMediaVideo(media="b", duration=-1)],
+        [Photo(file_id="a")],
+        [Photo(file_id="a")] * 11,
+        [Photo(file_id="a"), Document(file_id="b")],
+        [Photo(), Sticker()],
+        [Photo(), InputMediaPhoto(media="foreign")],
     ],
 )
 async def test_invalid_album_is_rejected_before_first_update(items):
@@ -195,7 +194,7 @@ async def test_invalid_album_is_rejected_before_first_update(items):
 @pytest.mark.asyncio
 async def test_album_waits_once_after_dispatch(monkeypatch):
     router = Router()
-    items = [InputMediaPhoto(media="a"), InputMediaPhoto(media="b")]
+    items = [Photo(file_id="a"), Photo(file_id="b")]
     replies = []
     waits = []
     original_sleep = asyncio.sleep
@@ -223,7 +222,7 @@ async def test_album_waits_once_after_dispatch(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_album_propagates_failure_and_keeps_completed_calls():
-    items = [InputMediaPhoto(media="a"), InputMediaPhoto(media="b")]
+    items = [Photo(file_id="a"), Photo(file_id="b")]
     failing = Router()
 
     @failing.message(F.photo)
@@ -234,8 +233,8 @@ async def test_album_propagates_failure_and_keeps_completed_calls():
 
     tester = BotTester.from_routers(failing)
     with pytest.raises(RuntimeError, match="second item failed"):
-        await tester.send_album([*items, InputMediaPhoto(media="c")])
-    assert [call.text for call in tester.api_calls] == ["First accepted"]
+        await tester.send_album([*items, Photo(file_id="c")])
+    assert [call.params["text"] for call in tester.api_calls] == ["First accepted"]
 
 
 @pytest.mark.asyncio
@@ -280,6 +279,12 @@ async def test_outgoing_media_assertions_and_metadata():
     photo.assert_caption("Done today")
     photo.assert_caption_contains("missing", "today")
     document.assert_document(file_name="report.pdf")
+    assert isinstance(document.document, Document)
+    assert isinstance(photo.photo[0], Photo)
+    assert isinstance(voice.voice, Voice)
+    assert isinstance(video.video, Video)
+    assert isinstance(sticker.sticker, Sticker)
+    assert tester.api_calls[1].params["document"] == Upload(filename="report.pdf")
     voice.assert_voice(file_id="voice-id")
     voice.assert_caption(None)
     video.assert_video(file_id="video-id")
@@ -313,10 +318,7 @@ async def test_outgoing_media_assertions_and_metadata():
 
 
 def test_assert_photo_matches_any_size_and_assertions_reject_missing_media():
-    sizes = tuple(
-        PhotoSize(file_id=str(n), file_unique_id=str(n), width=n, height=n)
-        for n in (32, 64)
-    )
+    sizes = tuple(Photo(file_id=str(n), width=n, height=n) for n in (32, 64))
     BotMessage(None, [], photo=sizes).assert_photo(file_id="32")
     text = BotMessage("Done", [])
     text.assert_caption(None)
@@ -355,8 +357,9 @@ async def test_media_response_preserves_keyboard_and_source_without_fetching():
     response.assert_photo()
     response.assert_button("Done")
     call = tester.api_calls[0]
-    assert isinstance(call, SendPhoto)
-    assert call.photo == url
+    assert isinstance(call, ApiCall)
+    assert call.method == "sendPhoto"
+    assert call.params["photo"] == url
     edited = await tester.tap_button("Done")
     edited.assert_photo()
     edited.assert_caption("A photo")
@@ -380,9 +383,49 @@ async def test_outgoing_album_captures_each_message_and_group_id():
 
     tester = BotTester.from_routers(router)
     first, second = await tester.send_album(
-        [InputMediaPhoto(media="a", caption="begin"), InputMediaVideo(media="b")]
+        [Photo(file_id="a", caption="begin"), Video(file_id="b")]
     )
     first.assert_photo(file_id="photo-id")
     first.assert_caption("Cover")
     second.assert_video(file_id="video-id")
     assert first.media_group_id and first.media_group_id == second.media_group_id
+
+
+@pytest.mark.asyncio
+async def test_request_snapshot_detaches_nested_telegram_models():
+    router = Router()
+
+    @router.message()
+    async def respond(message: Message):
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Done", callback_data="done")]]
+        )
+        await message.answer("Ready", reply_markup=markup)
+        markup.inline_keyboard[0].clear()
+
+    tester = BotTester.from_routers(router)
+    (await tester.start()).assert_button("Done")
+    (call,) = tester.api_calls
+    (row,) = call.params["reply_markup"]["inline_keyboard"]
+    (button,) = row
+    assert button["text"] == "Done"
+    with pytest.raises(TypeError):
+        button["text"] = "Changed"
+
+
+@pytest.mark.asyncio
+async def test_send_photo_accepts_caption_entities_as_keyword_argument():
+    router = Router()
+
+    @router.message(F.photo)
+    async def handle(message: Message):
+        (entity,) = message.caption_entities
+        assert (entity.type, entity.offset, entity.length) == ("bold", 0, 5)
+        await message.answer("Received")
+
+    tester = BotTester.from_routers(router)
+    reply = await tester.send_photo(
+        caption="Hello",
+        caption_entities=(CaptionEntity(type="bold", offset=0, length=5),),
+    )
+    reply.assert_contains("Received")

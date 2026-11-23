@@ -304,7 +304,8 @@ dispatcher. This lets you test events such as incoming photos or inline queries.
 
 The result is a tuple of captured messages and edits in order. An update that
 produces no captured message returns an empty tuple. Use `tester.api_calls` to
-inspect outgoing Telegram methods such as acknowledgments.
+inspect outgoing calls. Each `ApiCall` has a Telegram API method name
+(`call.method`) and a read-only parameter snapshot (`call.params`).
 
 ```python
 from datetime import datetime, timezone

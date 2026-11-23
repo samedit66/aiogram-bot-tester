@@ -1,4 +1,4 @@
-import aiogram_bot_tester.types as abt_types
+from .buttons import Button
 
 
 class BotTesterError(Exception):
@@ -17,7 +17,7 @@ class ButtonNotFoundError(BotTesterError):
     def __init__(
         self,
         label: str,
-        available_buttons: list[abt_types.Button],
+        available_buttons: list[Button],
     ) -> None:
         self.label = label
         self.available_buttons = available_buttons
@@ -39,7 +39,7 @@ class AmbiguousButtonError(BotTesterError):
     def __init__(
         self,
         label: str,
-        available_buttons: list[abt_types.Button],
+        available_buttons: list[Button],
     ) -> None:
         self.label = label
         self.available_buttons = available_buttons

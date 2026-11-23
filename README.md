@@ -100,7 +100,7 @@ async def test_welcome_transcript(tester):
 
 ### Send media and check the attachment
 
-Use `send_photo()`, `send_document()`, `send_voice()`, `send_video()`, or `send_sticker()` to send synthetic media metadata through the dispatcher. For a bot that echoes an uploaded avatar by its file ID:
+Pass media metadata as keyword arguments to `send_photo()`, `send_document()`, `send_voice()`, `send_video()`, or `send_sticker()`. The tester builds the Telegram update for you. For a bot that echoes an uploaded avatar by its file ID:
 
 ```python
 async def test_avatar(tester):
@@ -111,19 +111,19 @@ async def test_avatar(tester):
     reply.assert_caption_contains("saved")
 ```
 
-Use `assert_document()`, `assert_voice()`, `assert_video()`, and `assert_sticker()` for other attachments. The tester simulates metadata and keeps original outgoing URLs and upload objects in `tester.api_calls`.
+Use `assert_document()`, `assert_voice()`, `assert_video()`, and `assert_sticker()` for other attachments. Captured attachments are available as media models on the reply. Outgoing URLs and upload metadata are available in `tester.api_calls`.
 
 ### Send an album
 
-An album contains 2–10 items with file IDs. Mix photos and videos, or send a group of documents. Each item reaches your handler as its own update with a shared `media_group_id`. The result contains all captured replies in order, including an empty tuple when the bot stays silent.
+An album contains 2–10 media items. The tester generates a file ID when you omit one. Mix photos and videos, or send a group of documents. Each item reaches your handler as its own update with a shared `media_group_id`. The result contains all captured replies in order, including an empty tuple when the bot stays silent.
 
 ```python
-from aiogram.types import InputMediaPhoto
+from aiogram_bot_tester import Photo
 
 
 async def test_album(tester):
     replies = await tester.send_album(
-        [InputMediaPhoto(media="front"), InputMediaPhoto(media="back")]
+        [Photo(file_id="front"), Photo(file_id="back")]
     )
 
     front, back = replies
@@ -133,10 +133,9 @@ async def test_album(tester):
 
 ### Feed a custom update
 
-Use `feed_update()` for events such as inline queries. It returns all captured messages and edits from the update. Inspect `api_calls` when the expected outcome is an API call, such as an answer to an inline query.
+Use `feed_update()` for events such as inline queries. It returns all captured messages and edits from the update. Inspect `api_calls` when the expected outcome is an API call. Each `ApiCall` records the Bot API method name and a read-only snapshot of the supplied parameters.
 
 ```python
-from aiogram.methods import AnswerInlineQuery
 from aiogram.types import InlineQuery, Update, User
 
 
@@ -155,7 +154,7 @@ async def test_inline_search(tester):
 
     assert replies == ()
     assert any(
-        isinstance(call, AnswerInlineQuery) and call.inline_query_id == "search-1"
+        call.method == "answerInlineQuery" and call.params["inline_query_id"] == "search-1"
         for call in tester.api_calls
     )
 ```

@@ -17,9 +17,16 @@ A Python library for testing Telegram bots built with aiogram (v3.x). It enables
 ```
 .
 ├── src/aiogram_bot_tester/       # Package source
-│   ├── __init__.py               # Exports: BotTester, BotMessage
-│   ├── bot_tester.py             # Core: BotTester, BotConversation classes
-│   ├── types.py                  # Dataclasses: Button, CallbackButton, UrlButton, BotMessage
+│   ├── __init__.py               # Exports: tester, messages, and public models
+│   ├── bot_tester.py             # Public conversation API
+│   ├── bot_message.py            # Captured message and assertions
+│   ├── buttons.py                # Keyboard button models
+│   ├── media.py                  # Public attachment models
+│   ├── api_call.py               # Outgoing request snapshots
+│   ├── _conversation.py          # Dispatcher integration and conversation state
+│   ├── _offline_session.py       # Offline aiogram transport
+│   ├── _telegram_media.py        # Telegram media conversion
+│   ├── _request_snapshot.py      # Telegram request conversion
 │   └── exceptions.py             # Custom exceptions (BotTesterError hierarchy)
 ├── tests/                        # Test suite
 │   ├── test_api.py               # Unit tests for all public API methods
@@ -41,8 +48,8 @@ A Python library for testing Telegram bots built with aiogram (v3.x). It enables
 ### BotConversation (internal)
 
 - Wraps a Dispatcher with an offline aiogram session.
-- Records outgoing Telegram API methods in `tester.api_calls`.
-- Captures text messages and chat message edits as `BotMessage` objects for assertion.
+- Records outgoing Telegram API methods as `ApiCall` snapshots in `tester.api_calls`.
+- Captures text, supported media, and chat message edits as `BotMessage` objects.
 - Feeds simulated updates through the dispatcher's update pipeline using `dispatcher.feed_update()`.
 
 ### BotMessage (assertion helper)
@@ -57,9 +64,16 @@ Immutable dataclass with convenience methods:
 - `assert_*` / `refute_*` helpers — provide readable assertion failures for text,
   regex, button, and keyboard checks
 
+### Public aiogram boundary
+
+`from_routers()`, `from_dispatcher()`, and `feed_update()` accept aiogram objects.
+FSM checks accept aiogram `State` objects. Single-media helpers take keyword
+arguments. Albums accept `Photo`, `Document`, and `Video` models. Captured
+attachments use the package’s media models.
+
 ### FSM Support
 
-The tester uses aiogram's built-in `MemoryStorage` for FSM state management. Test code can:
+The router factory uses aiogram's built-in `MemoryStorage`. A supplied dispatcher keeps its configured storage. Test code can:
 - Check current state via `tester.in_state(state)`
 - Inspect stored data via `tester.data_has(**kwargs)`
 - Assert or refute state and data via `assert_state`, `refute_state`,
@@ -141,7 +155,7 @@ All exceptions inherit from `BotTesterError`:
 
 2. **Router deep-copying**: Routers are deep-copied when passed to `from_routers()` because aiogram routers can only be attached to one dispatcher. This prevents issues when a tester fixture is used across multiple test functions.
 
-3. **Offline Telegram session**: The session handles `SendMessage`, `EditMessageText`, `EditMessageReplyMarkup`, and `AnswerCallbackQuery` with simulated Telegram responses. Other API calls return mocks.
+3. **Offline Telegram session**: The session simulates text and supported media sends, text and reply markup edits, and callback acknowledgments. Other API calls return mocks.
 
 4. **Declarative chat testing**: `tester.chat(transcript)` replays a transcript of user/bot messages and asserts bot responses match expected text.
 

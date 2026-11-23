@@ -4,13 +4,7 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.filters.command import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.methods import (
-    AnswerCallbackQuery,
-    AnswerInlineQuery,
-    EditMessageReplyMarkup,
-    EditMessageText,
-    SendMessage,
-)
+from aiogram.methods import SendMessage
 from aiogram.types import (
     CallbackQuery,
     Chat,
@@ -829,11 +823,11 @@ async def test_callback_uses_sent_message_and_returns_latest_edit() -> None:
     response = await tester.tap_button("Edit")
     response.assert_contains("Edited")
     response.refute_button("Old")
-    assert [type(call) for call in tester.api_calls] == [
-        SendMessage,
-        AnswerCallbackQuery,
-        EditMessageText,
-        EditMessageReplyMarkup,
+    assert [call.method for call in tester.api_calls] == [
+        "sendMessage",
+        "answerCallbackQuery",
+        "editMessageText",
+        "editMessageReplyMarkup",
     ]
 
 
@@ -870,9 +864,8 @@ async def test_callback_acknowledgment_is_not_a_bot_message() -> None:
     with pytest.raises(NoBotResponseError):
         await tester.tap_button("Confirm")
     first, second = tester.api_calls[-2:]
-    assert isinstance(first, AnswerCallbackQuery)
-    assert isinstance(second, AnswerCallbackQuery)
-    assert first.callback_query_id != second.callback_query_id
+    assert first.method == second.method == "answerCallbackQuery"
+    assert first.params["callback_query_id"] != second.params["callback_query_id"]
 
 
 @pytest.mark.asyncio
@@ -906,7 +899,7 @@ async def test_feed_update_dispatches_media_and_captures_webhook_response() -> N
     assert photo.photo is not None
     assert photo.photo[0].bot is None
     assert all(
-        isinstance(call, SendMessage) and call.chat_id == photo.chat.id
+        call.method == "sendMessage" and call.params["chat_id"] == photo.chat.id
         for call in tester.api_calls
     )
     assert (
@@ -920,4 +913,4 @@ async def test_feed_update_dispatches_media_and_captures_webhook_response() -> N
         )
         == ()
     )
-    assert isinstance(tester.api_calls[-1], AnswerInlineQuery)
+    assert tester.api_calls[-1].method == "answerInlineQuery"
