@@ -4,8 +4,9 @@ import asyncio
 import copy
 import dataclasses as dc
 import datetime as dt
+import itertools
 import unittest.mock as mock
-from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterable, Mapping, Sequence
 from typing import Any, TypeVar, cast
 
 import aiogram as aio
@@ -21,6 +22,7 @@ from aiogram.types.update import UpdateTypeLookupError
 
 import aiogram_bot_tester.exceptions as abt_exceptions
 import aiogram_bot_tester.types as abt_types
+from aiogram_bot_tester import _media
 
 
 _TelegramResult = TypeVar("_TelegramResult")
@@ -75,6 +77,8 @@ class BotConversation:
         self._max_message_id = 0
         self._chats = {chat_id: aio_types.Chat(id=chat_id, type="private")}
         self._max_update_id = 0
+        self._file_ids = itertools.count(1)
+        self._album_ids = itertools.count(1)
 
         self.bot = aio.Bot(token, session=_OfflineSession(self._capture_request))
 
@@ -87,22 +91,50 @@ class BotConversation:
     async def send_message(
         self, text: str, timeout: int | None = None
     ) -> abt_types.BotMessage:
-        update = aio_types.Update(
-            update_id=self._next_update_id(),
-            message=aio_types.Message(
-                message_id=self._next_message_id(),
-                date=dt.datetime.now(dt.timezone.utc),
-                chat=self._chats[self.chat_id],
-                from_user=self.user,
-                text=text,
-            ),
+        return await self.send_payload(f"message: {text!r}", timeout, text=text)
+
+    def file_id(self, supplied: str | None) -> str:
+        return supplied if supplied is not None else f"test-file-{next(self._file_ids)}"
+
+    async def send_payload(
+        self, description: str, timeout: int | None, **fields: object
+    ) -> abt_types.BotMessage:
+        responses = await self._feed_updates(
+            map(self._message_update, (fields,)), timeout
         )
-        responses = await self.feed_update(update, timeout)
         if not responses:
             raise abt_exceptions.NoBotResponseError(
-                f"Bot did not respond to message: {text!r}"
+                f"Bot did not respond to {description}"
             )
         return responses[-1]
+
+    async def send_album(
+        self, items: Sequence[_media.AlbumItem], timeout: int | None
+    ) -> tuple[abt_types.BotMessage, ...]:
+        payloads = _media.album_payloads(items)
+        group_id = self._next_album_id()
+        return await self._feed_updates(
+            (
+                self._message_update({**fields, "media_group_id": group_id})
+                for fields in payloads
+            ),
+            timeout,
+        )
+
+    def _message_update(self, fields: Mapping[str, object]) -> aio_types.Update:
+        message = aio_types.Message.model_validate(
+            {
+                "message_id": self._next_message_id(),
+                "date": dt.datetime.now(dt.timezone.utc),
+                "chat": self._chats[self.chat_id],
+                "from_user": self.user,
+                **fields,
+            }
+        )
+        return aio_types.Update(update_id=self._next_update_id(), message=message)
+
+    def _next_album_id(self) -> str:
+        return f"test-album-{next(self._album_ids)}"
 
     async def tap_callback_button(
         self, button: abt_types.CallbackButton, timeout: int | None = None
@@ -128,17 +160,22 @@ class BotConversation:
     async def feed_update(
         self, update: aio_types.Update, timeout: int | None = None
     ) -> tuple[abt_types.BotMessage, ...]:
+        return await self._feed_updates((update,), timeout)
+
+    async def _feed_updates(
+        self, updates: Iterable[aio_types.Update], timeout: int | None
+    ) -> tuple[abt_types.BotMessage, ...]:
         async with self._dispatch_lock:
             before = len(self.bot_messages)
-            # Rebind nested Telegram objects even when the input update is already
-            # attached to this bot. aiogram's shortcuts use those nested bindings.
-            bound = aio_types.Update.model_validate(
-                update.model_dump(), context={"bot": self.bot}
-            )
-            self._observe_update(bound)
-            result = await self.dispatcher.feed_update(bot=self.bot, update=bound)
-            if isinstance(result, aio_methods.TelegramMethod):
-                await self.bot(result)
+            for update in updates:
+                # Rebind nested Telegram objects for aiogram shortcuts.
+                bound = aio_types.Update.model_validate(
+                    update.model_dump(), context={"bot": self.bot}
+                )
+                self._observe_update(bound)
+                result = await self.dispatcher.feed_update(bot=self.bot, update=bound)
+                if isinstance(result, aio_methods.TelegramMethod):
+                    await self.bot(result)
             if timeout:
                 await asyncio.sleep(timeout)
             return tuple(self.bot_messages[before:])
@@ -217,7 +254,17 @@ class BotConversation:
         self._messages[message.chat.id, message.message_id] = message
         self._last_message = message
         self.bot_messages.append(
-            abt_types.BotMessage(text=message.text, keyboard=_keyboard(markup))
+            abt_types.BotMessage(
+                text=message.text,
+                keyboard=_keyboard(markup),
+                caption=message.caption,
+                photo=tuple(message.photo or ()),
+                document=message.document,
+                voice=message.voice,
+                video=message.video,
+                sticker=message.sticker,
+                media_group_id=message.media_group_id,
+            )
         )
         return message
 
@@ -225,33 +272,67 @@ class BotConversation:
         self,
         bot: aio.Bot,
         method: aio_methods.TelegramMethod[Any],
-    ) -> aio_types.Message | bool | mock.MagicMock:
+    ) -> aio_types.Message | list[aio_types.Message] | bool | mock.MagicMock:
         self.api_calls.append(method.model_copy())
         if isinstance(method, aio_methods.AnswerCallbackQuery):
             return True
         if isinstance(method, aio_methods.SendMessage):
-            chat_id = self._resolve_chat_id(method.chat_id)
-            chat = self._chats.get(chat_id)
-            if chat is None:
-                chat = aio_types.Chat(
-                    id=chat_id, type="private" if chat_id > 0 else "supergroup"
-                )
-            message = aio_types.Message(
-                message_id=self._next_message_id(),
-                date=dt.datetime.now(dt.timezone.utc),
-                chat=chat,
-                from_user=aio_types.User(id=bot.id, is_bot=True, first_name="Test Bot"),
+            return self._send_response(
+                bot,
+                method.chat_id,
+                method.reply_markup,
+                method.message_thread_id,
+                method.business_connection_id,
                 text=method.text,
                 entities=method.entities,
-                message_thread_id=method.message_thread_id,
-                business_connection_id=method.business_connection_id,
-                reply_markup=(
-                    method.reply_markup
-                    if isinstance(method.reply_markup, aio_types.InlineKeyboardMarkup)
-                    else None
-                ),
-            ).as_(bot)
-            return self._record_message(message, method.reply_markup)
+            )
+        if isinstance(
+            method,
+            (
+                aio_methods.SendPhoto,
+                aio_methods.SendDocument,
+                aio_methods.SendVoice,
+                aio_methods.SendVideo,
+                aio_methods.SendSticker,
+            ),
+        ):
+            fields = self._outgoing_media(method)
+            return self._send_response(
+                bot,
+                method.chat_id,
+                method.reply_markup,
+                method.message_thread_id,
+                method.business_connection_id,
+                **fields,
+            )
+        if isinstance(method, aio_methods.SendMediaGroup):
+            items = [
+                item
+                for item in method.media
+                if isinstance(
+                    item,
+                    (
+                        aio_types.InputMediaPhoto,
+                        aio_types.InputMediaVideo,
+                        aio_types.InputMediaDocument,
+                    ),
+                )
+            ]
+            if len(items) == len(method.media):
+                payloads = _media.album_payloads(items, self._outgoing_file_id)
+                group_id = self._next_album_id()
+                return [
+                    self._send_response(
+                        bot,
+                        method.chat_id,
+                        None,
+                        method.message_thread_id,
+                        method.business_connection_id,
+                        media_group_id=group_id,
+                        **fields,
+                    )
+                    for fields in payloads
+                ]
         if isinstance(
             method, (aio_methods.EditMessageText, aio_methods.EditMessageReplyMarkup)
         ):
@@ -274,6 +355,88 @@ class BotConversation:
                 previous_message.model_copy(update=changes), method.reply_markup
             )
         return mock.MagicMock()
+
+    def _outgoing_file_id(self, source: str | aio_types.InputFile) -> str:
+        return self.file_id(
+            source if isinstance(source, str) and "://" not in source else None
+        )
+
+    def _outgoing_media(
+        self,
+        method: aio_methods.SendPhoto
+        | aio_methods.SendDocument
+        | aio_methods.SendVoice
+        | aio_methods.SendVideo
+        | aio_methods.SendSticker,
+    ) -> dict[str, object]:
+        if isinstance(method, aio_methods.SendSticker):
+            return {
+                "sticker": _media.sticker(
+                    self._outgoing_file_id(method.sticker), method.emoji
+                )
+            }
+
+        fields: dict[str, object] = {
+            "caption": method.caption,
+            "caption_entities": method.caption_entities,
+        }
+        if isinstance(method, aio_methods.SendPhoto):
+            fields["photo"] = _media.photo(self._outgoing_file_id(method.photo))
+        elif isinstance(method, aio_methods.SendDocument):
+            name = (
+                method.document.filename
+                if isinstance(method.document, aio_types.InputFile)
+                else None
+            )
+            fields["document"] = _media.document(
+                self._outgoing_file_id(method.document), name
+            )
+        elif isinstance(method, aio_methods.SendVoice):
+            fields["voice"] = _media.voice(
+                self._outgoing_file_id(method.voice), method.duration or 0
+            )
+        else:
+            fields["video"] = _media.video(
+                self._outgoing_file_id(method.video),
+                method.width or 640,
+                method.height or 480,
+                method.duration or 0,
+            )
+        return fields
+
+    def _send_response(
+        self,
+        bot: aio.Bot,
+        target: int | str | None,
+        markup: aio_types.ReplyMarkupUnion | None,
+        thread_id: int | None,
+        business_connection_id: str | None,
+        **fields: object,
+    ) -> aio_types.Message:
+        chat_id = self._resolve_chat_id(target)
+        chat = self._chats.get(chat_id)
+        if chat is None:
+            chat = aio_types.Chat(
+                id=chat_id, type="private" if chat_id > 0 else "supergroup"
+            )
+        message = aio_types.Message.model_validate(
+            {
+                "message_id": self._next_message_id(),
+                "date": dt.datetime.now(dt.timezone.utc),
+                "chat": chat,
+                "from_user": aio_types.User(
+                    id=bot.id, is_bot=True, first_name="Test Bot"
+                ),
+                "message_thread_id": thread_id,
+                "business_connection_id": business_connection_id,
+                "reply_markup": markup
+                if isinstance(markup, aio_types.InlineKeyboardMarkup)
+                else None,
+                **fields,
+            },
+            context={"bot": bot},
+        )
+        return self._record_message(message, markup)
 
 
 def _keyboard(
@@ -436,6 +599,89 @@ class BotTester:
         ```
         """
         return await self.bot_conversation.send_message(text, timeout)
+
+    async def send_photo(
+        self,
+        *,
+        file_id: str | None = None,
+        width: int = 640,
+        height: int = 480,
+        caption: str | None = None,
+        timeout: int | None = None,
+    ) -> abt_types.BotMessage:
+        """Simulate a photo and return the last captured response."""
+        conversation = self.bot_conversation
+        photo = _media.photo(conversation.file_id(file_id), width, height)
+        return await conversation.send_payload(
+            "photo", timeout, photo=photo, caption=caption
+        )
+
+    async def send_document(
+        self,
+        *,
+        file_name: str,
+        file_id: str | None = None,
+        mime_type: str | None = None,
+        caption: str | None = None,
+        timeout: int | None = None,
+    ) -> abt_types.BotMessage:
+        """Simulate a document and return the last captured response."""
+        conversation = self.bot_conversation
+        document = _media.document(conversation.file_id(file_id), file_name, mime_type)
+        return await conversation.send_payload(
+            "document", timeout, document=document, caption=caption
+        )
+
+    async def send_voice(
+        self,
+        *,
+        file_id: str | None = None,
+        duration: int = 1,
+        mime_type: str | None = None,
+        caption: str | None = None,
+        timeout: int | None = None,
+    ) -> abt_types.BotMessage:
+        """Simulate a voice message and return the last captured response."""
+        conversation = self.bot_conversation
+        voice = _media.voice(conversation.file_id(file_id), duration, mime_type)
+        return await conversation.send_payload(
+            "voice message", timeout, voice=voice, caption=caption
+        )
+
+    async def send_video(
+        self,
+        *,
+        file_id: str | None = None,
+        width: int = 640,
+        height: int = 480,
+        duration: int = 1,
+        caption: str | None = None,
+        timeout: int | None = None,
+    ) -> abt_types.BotMessage:
+        """Simulate a video and return the last captured response."""
+        conversation = self.bot_conversation
+        video = _media.video(conversation.file_id(file_id), width, height, duration)
+        return await conversation.send_payload(
+            "video", timeout, video=video, caption=caption
+        )
+
+    async def send_sticker(
+        self,
+        *,
+        file_id: str | None = None,
+        emoji: str | None = None,
+        timeout: int | None = None,
+    ) -> abt_types.BotMessage:
+        """Simulate a static sticker and return the last captured response."""
+        conversation = self.bot_conversation
+        sticker = _media.sticker(conversation.file_id(file_id), emoji)
+        return await conversation.send_payload("sticker", timeout, sticker=sticker)
+
+    async def send_album(
+        self, items: Sequence[_media.AlbumItem], *, timeout: int | None = None
+    ) -> tuple[abt_types.BotMessage, ...]:
+        """Deliver the album as separate updates and return all captured responses."""
+        return await self.bot_conversation.send_album(items, timeout)
 
     async def send_command(
         self, command: str, *args: object, command_prefix: str = "/"

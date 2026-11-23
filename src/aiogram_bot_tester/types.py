@@ -2,6 +2,8 @@ import dataclasses as dc
 import itertools
 import re
 
+from aiogram.types import Document, PhotoSize, Sticker, Video, Voice
+
 
 @dc.dataclass(frozen=True, slots=True)
 class Button:
@@ -29,6 +31,13 @@ class BotMessage:
 
     text: str | None
     keyboard: list[list[Button]]
+    caption: str | None = dc.field(default=None, kw_only=True)
+    photo: tuple[PhotoSize, ...] = dc.field(default=(), kw_only=True)
+    document: Document | None = dc.field(default=None, kw_only=True)
+    voice: Voice | None = dc.field(default=None, kw_only=True)
+    video: Video | None = dc.field(default=None, kw_only=True)
+    sticker: Sticker | None = dc.field(default=None, kw_only=True)
+    media_group_id: str | None = dc.field(default=None, kw_only=True)
 
     @property
     def buttons(self) -> list[Button]:
@@ -54,8 +63,7 @@ class BotMessage:
     def is_empty(self) -> bool:
         """
         Checks whether a message is empty.
-        A message is empty when it contains no text (`text` is `None`) and
-        no keyboard (`keyboard` is an empty `list`).
+        A message is empty when it has no text, keyboard, caption, or media.
 
         Example:
 
@@ -63,7 +71,63 @@ class BotMessage:
         print(message.is_empty()) # True or False
         ```
         """
-        return not (self.text or self.keyboard)
+        return not any(
+            (
+                self.text,
+                self.keyboard,
+                self.caption,
+                self.photo,
+                self.document,
+                self.voice,
+                self.video,
+                self.sticker,
+            )
+        )
+
+    def assert_photo(self, *, file_id: str | None = None) -> None:
+        """Assert that a photo is present and optionally match any of its file IDs."""
+        if not self.photo:
+            raise AssertionError("Expected a photo, but the message has no photo.")
+        if file_id is not None and all(size.file_id != file_id for size in self.photo):
+            actual = tuple(size.file_id for size in self.photo)
+            raise AssertionError(f"Expected photo file_id {file_id!r}, got {actual!r}.")
+
+    def assert_document(
+        self, *, file_id: str | None = None, file_name: str | None = None
+    ) -> None:
+        """Assert that a document is present and match any supplied metadata."""
+        _assert_attachment(
+            "document", self.document, file_id=file_id, file_name=file_name
+        )
+
+    def assert_voice(self, *, file_id: str | None = None) -> None:
+        """Assert that a voice message is present and optionally match its file ID."""
+        _assert_attachment("voice", self.voice, file_id=file_id)
+
+    def assert_video(self, *, file_id: str | None = None) -> None:
+        """Assert that a video is present and optionally match its file ID."""
+        _assert_attachment("video", self.video, file_id=file_id)
+
+    def assert_sticker(
+        self, *, file_id: str | None = None, emoji: str | None = None
+    ) -> None:
+        """Assert that a sticker is present and match any supplied metadata."""
+        _assert_attachment("sticker", self.sticker, file_id=file_id, emoji=emoji)
+
+    def assert_caption(self, expected: str | None) -> None:
+        """Assert the exact caption, or its absence when expected is None."""
+        if self.caption != expected:
+            raise AssertionError(
+                f"Expected caption {expected!r}, got {self.caption!r}."
+            )
+
+    def assert_caption_contains(self, text: str, *texts: str) -> None:
+        """Assert that the caption contains at least one supplied substring."""
+        expected = (text, *texts)
+        if self.caption is None or not any(item in self.caption for item in expected):
+            raise AssertionError(
+                f"Expected caption to contain one of {expected!r}, got {self.caption!r}."
+            )
 
     def contains(self, text: str, *texts: str) -> bool:
         """
@@ -418,3 +482,22 @@ class BotMessage:
             raise AssertionError(
                 f"Expected keyboard not to equal {keyboard!r}, but it matched exactly."
             )
+
+
+def _assert_attachment(
+    kind: str,
+    attachment: Document | Voice | Video | Sticker | None,
+    **expected: str | None,
+) -> None:
+    if attachment is None:
+        raise AssertionError(f"Expected {kind}, but the message has none.")
+    for field, value in expected.items():
+        if value is None:
+            continue
+        actual = getattr(attachment, field)
+        if actual is None:
+            raise AssertionError(
+                f"Expected {kind} {field} {value!r}, but {field} is unavailable."
+            )
+        if actual != value:
+            raise AssertionError(f"Expected {kind} {field} {value!r}, got {actual!r}.")
