@@ -18,6 +18,7 @@ or contacting Telegram.
   - [Test User Parameters](#test-user-parameters)
 - [BotTester Methods](#bottester-methods)
   - [send_message](#send_message)
+  - [feed_update](#feed_update)
   - [send_command](#send_command)
   - [start](#start)
   - [tap_button](#tap_button)
@@ -71,26 +72,19 @@ Normally, aiogram calls this API on behalf of your bot.
 
 1. creates test `Message`, `CallbackQuery`, and `Update` objects;
 2. passes them to `Dispatcher.feed_update()`;
-3. replaces the aiogram HTTP session with a mock;
+3. uses an offline aiogram session;
 4. intercepts Telegram Bot API calls;
 5. converts `SendMessage` calls into `BotMessage` objects.
 
 The tests are therefore offline and deterministic. You do not need a real bot
 token, and no messages are sent to real users.
 
-At present, response content is fully captured for the Telegram Bot API
-`SendMessage` method: text, reply keyboards, inline callback buttons, and inline
-URL buttons.
+`BotMessage` captures the text and keyboards of sent messages and chat message
+edits. Use `tester.api_calls` to inspect outgoing calls such as media sends or
+deletions.
 
-> [!WARNING]
-> Full assertions for photos, videos, documents, stickers, and other media are
-> not supported yet. Message editing and deletion, and other Telegram methods
-> besides `SendMessage`, are not supported either. Do not use the current
-> `BotMessage` representation to assert the content of those calls.
-
-If a handler calls `message.answer()` several times in response to one action,
-all messages are captured internally, but the public interaction method returns
-the **last** captured `BotMessage`.
+The convenience methods such as `send_message()` return the last captured
+message. `feed_update()` returns all captured responses for the update.
 
 ## Requirements and Installation
 
@@ -113,7 +107,7 @@ Or install the latest version from the repository:
 pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 ```
 
-`pytest-asyncio` is installed as a library dependency. Every asynchronous test
+`pytest` and `pytest-asyncio` are installed separately with `pip install pytest pytest-asyncio`. Every asynchronous test
 in this tutorial is decorated with `@pytest.mark.asyncio`:
 
 ```python
@@ -302,6 +296,49 @@ If the bot sends no response, `NoBotResponseError` is raised.
 `timeout` is not a deadline and does not interrupt a slow handler. The
 dispatcher first finishes processing the update, then the library calls
 `asyncio.sleep(timeout)`, and only then checks for a response.
+
+### feed_update
+
+Use `feed_update(update)` to pass an aiogram `Update` directly to the
+dispatcher. This lets you test events such as incoming photos or inline queries.
+
+The result is a tuple of captured messages and edits in order. An update that
+produces no captured message returns an empty tuple. Use `tester.api_calls` to
+inspect outgoing Telegram methods such as acknowledgments.
+
+```python
+from datetime import datetime, timezone
+
+import pytest
+from aiogram import F, Router
+from aiogram.types import Chat, Message, PhotoSize, Update, User
+
+from aiogram_bot_tester import BotTester
+
+router = Router()
+
+
+@router.message(F.photo)
+async def receive_photo(message: Message) -> None:
+    await message.answer("Photo received.")
+
+
+@pytest.mark.asyncio
+async def test_incoming_photo() -> None:
+    tester = BotTester.from_routers(router)
+    update = Update(
+        update_id=100,
+        message=Message(
+            message_id=100,
+            date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            chat=Chat(id=1, type="private"),
+            from_user=User(id=1, is_bot=False, first_name="Bob"),
+            photo=[PhotoSize(file_id="photo", file_unique_id="unique", width=64, height=64)],
+        ),
+    )
+    (response,) = await tester.feed_update(update)
+    response.assert_contains("Photo received.")
+```
 
 ### send_command
 

@@ -18,6 +18,7 @@
   - [Параметры тестового пользователя](#параметры-тестового-пользователя)
 - [Методы BotTester](#методы-bottester)
   - [send_message](#send_message)
+  - [feed_update](#feed_update)
   - [send_command](#send_command)
   - [start](#start)
   - [tap_button](#tap_button)
@@ -71,26 +72,19 @@ Telegram Bot API — HTTP API, через который бот получает
 
 1. создаёт тестовые объекты `Message`, `CallbackQuery` и `Update`;
 2. передаёт их в `Dispatcher.feed_update()`;
-3. подменяет HTTP-сессию aiogram mock-объектом;
+3. использует офлайн-сессию aiogram;
 4. перехватывает вызовы Telegram Bot API;
 5. преобразует вызовы `SendMessage` в объекты `BotMessage`.
 
 Поэтому тесты работают офлайн и детерминированно: токен настоящего бота не нужен,
 а сообщения не отправляются реальным пользователям.
 
-Сейчас содержимое ответа полноценно захватывается для метода Telegram Bot API
-`SendMessage`: текст, reply-клавиатура, inline callback-кнопки и inline
-URL-кнопки.
+`BotMessage` содержит текст и клавиатуры отправленных и отредактированных
+сообщений чата. Исходящие вызовы, например отправку медиа или удаление сообщений,
+можно проверить через `tester.api_calls`.
 
-> [!WARNING]
-> Пока не поддерживается полноценная проверка отправки фото, видео, документов,
-> стикеров и других медиа, а также редактирования и удаления сообщений и прочих
-> Telegram methods, отличных от `SendMessage`. Не используйте текущий
-> `BotMessage` для утверждений о содержимом таких вызовов.
-
-Если в ответ на одно действие хендлер вызывает `message.answer()` несколько раз,
-внутренне захватываются все сообщения, но публичный метод возвращает **последний**
-захваченный `BotMessage`.
+Методы вроде `send_message()` возвращают последнее захваченное сообщение.
+`feed_update()` возвращает все захваченные ответы на обновление.
 
 ## Требования и установка
 
@@ -113,7 +107,7 @@ pip install aiogram_bot_tester
 pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 ```
 
-`pytest-asyncio` устанавливается как зависимость библиотеки. Каждый асинхронный
+`pytest` и `pytest-asyncio` устанавливаются отдельно командой `pip install pytest pytest-asyncio`. Каждый асинхронный
 тест в этом руководстве декорирован `@pytest.mark.asyncio`:
 
 ```python
@@ -304,6 +298,50 @@ async def test_greeting() -> None:
 `timeout` не является дедлайном и не прерывает медленный хендлер. Сначала
 dispatcher полностью обрабатывает update, затем библиотека выполняет
 `asyncio.sleep(timeout)`, и только после этого проверяет наличие ответа.
+
+### feed_update
+
+Передайте объект aiogram `Update` в `feed_update(update)`, чтобы отправить
+обновление напрямую в диспетчер. Так можно проверить получение фото,
+inline-запросы и другие события.
+
+Метод возвращает кортеж захваченных сообщений и правок в порядке появления.
+Если обновление не вызвало ни одного такого ответа, метод возвращает пустой
+кортеж. Подтверждения и другие исходящие вызовы доступны в `tester.api_calls`.
+
+```python
+from datetime import datetime, timezone
+
+import pytest
+from aiogram import F, Router
+from aiogram.types import Chat, Message, PhotoSize, Update, User
+
+from aiogram_bot_tester import BotTester
+
+router = Router()
+
+
+@router.message(F.photo)
+async def receive_photo(message: Message) -> None:
+    await message.answer("Фото получено.")
+
+
+@pytest.mark.asyncio
+async def test_incoming_photo() -> None:
+    tester = BotTester.from_routers(router)
+    update = Update(
+        update_id=100,
+        message=Message(
+            message_id=100,
+            date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            chat=Chat(id=1, type="private"),
+            from_user=User(id=1, is_bot=False, first_name="Bob"),
+            photo=[PhotoSize(file_id="photo", file_unique_id="unique", width=64, height=64)],
+        ),
+    )
+    (response,) = await tester.feed_update(update)
+    response.assert_contains("Фото получено.")
+```
 
 ### send_command
 

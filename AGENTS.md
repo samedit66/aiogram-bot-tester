@@ -9,7 +9,7 @@ A Python library for testing Telegram bots built with aiogram (v3.x). It enables
 - **Language**: Python 3.10+
 - **Framework**: aiogram 3.x (Telegram Bot framework)
 - **Testing**: pytest + pytest-asyncio
-- **Linting/Formatting**: Ruff
+- **Static checks**: Ruff and mypy
 - **Package Manager / Build Tool**: uv (uv.lock, `uv_build` as build backend)
 
 ## Project Structure
@@ -40,9 +40,9 @@ A Python library for testing Telegram bots built with aiogram (v3.x). It enables
 
 ### BotConversation (internal)
 
-- Wraps a Dispatcher with a mocked aiohttp session.
-- Intercepts Telegram API calls via `mock.AsyncMock` in `_capture_request`.
-- Captures outgoing messages as `BotMessage` objects for assertion.
+- Wraps a Dispatcher with an offline aiogram session.
+- Records outgoing Telegram API methods in `tester.api_calls`.
+- Captures text messages and chat message edits as `BotMessage` objects for assertion.
 - Feeds simulated updates through the dispatcher's update pipeline using `dispatcher.feed_update()`.
 
 ### BotMessage (assertion helper)
@@ -103,8 +103,8 @@ feat!: add declarative assertion helpers
 
 ## Dependencies
 
-- **Runtime**: `aiogram>=3.28.2`, `pytest-asyncio>=1.3.0`
-- **Dev**: `pytest>=9.0.3`, `ruff>=0.15.13`
+- **Runtime**: `aiogram>=3.28.2,<4`
+- **Dev**: `mypy>=1.18.2`, `pytest>=9.0.3`, `pytest-asyncio>=1.3.0`, `ruff>=0.15.13`
 
 All dependencies are managed by uv. Use `uv sync` to install.
 
@@ -131,6 +131,7 @@ All exceptions inherit from `BotTesterError`:
 - `NoBotResponseError` — bot did not respond to a user action
 - `ButtonNotFoundError` — specified button label not found in last bot message
 - `UrlButtonInteractionError` — attempting to tap a URL button (unsupported)
+- `UnsupportedButtonInteractionError` — attempting to tap an inline button that performs another Telegram action
 - `AmbiguousButtonError` — multiple buttons share the same label
 - `InvalidTranscriptError` — raised when transcript format is malformed in `chat()`
 
@@ -140,7 +141,7 @@ All exceptions inherit from `BotTesterError`:
 
 2. **Router deep-copying**: Routers are deep-copied when passed to `from_routers()` because aiogram routers can only be attached to one dispatcher. This prevents issues when a tester fixture is used across multiple test functions.
 
-3. **Mocked API calls**: The aiohttp session's `make_request` is replaced with an AsyncMock that intercepts TelegramMethod calls and captures SendMessage content as BotMessage objects. No network requests are made.
+3. **Offline Telegram session**: The session handles `SendMessage`, `EditMessageText`, `EditMessageReplyMarkup`, and `AnswerCallbackQuery` with simulated Telegram responses. Other API calls return mocks.
 
 4. **Declarative chat testing**: `tester.chat(transcript)` replays a transcript of user/bot messages and asserts bot responses match expected text.
 
@@ -169,3 +170,14 @@ async def test_registration(tester):
 - Only text messages supported (no button tapping in v1)
 
 **Exception:** `InvalidTranscriptError` — raised when transcript format is malformed.
+
+## Publishing releases
+
+Create a GitHub environment named `pypi` and restrict it to release tags.
+Register a PyPI Trusted Publisher for owner `samedit66`, repository
+`aiogram-bot-tester`, workflow `ci-and-publish.yml`, and environment `pypi`.
+
+Set an unused version in `pyproject.toml` and refresh `uv.lock` with `uv lock`.
+Once the release commit is merged, push the matching `vMAJOR.MINOR.PATCH` tag.
+After the CI checks pass, the workflow publishes the verified wheel and source
+distribution with `uv publish --trusted-publishing always dist/*`.

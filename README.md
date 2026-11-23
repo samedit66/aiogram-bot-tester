@@ -2,18 +2,19 @@
 
 > Your missing test toolkit for Telegram bots.
 
-![aiogram](https://img.shields.io/badge/aiogram-3.x-blue?logo=telegram)
-![telegram](https://img.shields.io/badge/telegram-bot-blue?logo=telegram)
-![status](https://img.shields.io/badge/status-WIP-orange)
-![python](https://img.shields.io/badge/python-3.10+-blue?logo=python)
+[![CI](https://github.com/samedit66/aiogram-bot-tester/actions/workflows/ci-and-publish.yml/badge.svg?branch=main)](https://github.com/samedit66/aiogram-bot-tester/actions/workflows/ci-and-publish.yml)
+[![PyPI version](https://img.shields.io/pypi/v/aiogram-bot-tester?logo=pypi)](https://pypi.org/project/aiogram-bot-tester/)
+[![Python 3.10–3.15](https://img.shields.io/badge/Python-3.10%E2%80%933.15-blue?logo=python)](https://github.com/samedit66/aiogram-bot-tester/actions/workflows/ci-and-publish.yml)
+[![aiogram 3.x](https://img.shields.io/badge/aiogram-3.x-blue?logo=telegram)](https://docs.aiogram.dev/)
+[![Apache 2.0 license](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/samedit66/aiogram-bot-tester/blob/main/LICENSE)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/aiogram-bot-tester?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads)](https://pepy.tech/projects/aiogram-bot-tester)
 
 > [!WARNING]
 > This library is under active development. Its API is unstable and may contain
 > frequent breaking changes between releases.
 
-- [English tutorial](docs/TUTORIAL_EN.MD)
-- [Русский туториал](docs/TUTORIAL_RU.md)
+- [English tutorial](https://github.com/samedit66/aiogram-bot-tester/blob/main/docs/TUTORIAL_EN.MD)
+- [Русский туториал](https://github.com/samedit66/aiogram-bot-tester/blob/main/docs/TUTORIAL_RU.md)
 
 ## Installation
 
@@ -44,18 +45,31 @@ pip install git+https://github.com/samedit66/aiogram-bot-tester.git
 
 ## Quick example
 
+Install `pytest` and `pytest-asyncio` in your test environment to run this example.
+
 ```python
+from datetime import datetime, timezone
+
 import pytest
-import aiogram
-from aiogram import F
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram import F, Router
+from aiogram.filters import CommandStart
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    PhotoSize,
+    Update,
+    User,
+)
 
 from aiogram_bot_tester import BotTester
 
-router = aiogram.Router()
+router = Router()
 
 
-@router.message(aiogram.filters.CommandStart())
+@router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
         "Hello! Press Continue or send me your name.",
@@ -72,9 +86,15 @@ async def echo_name(message: Message) -> None:
     await message.answer(f"Nice to meet you, {message.text}!")
 
 
+@router.message(F.photo)
+async def receive_photo(message: Message) -> None:
+    await message.answer("Photo received.")
+
+
 @router.callback_query(F.data == "continue")
 async def on_continue(callback: CallbackQuery) -> None:
-    await callback.message.answer("Please send your name.")
+    if isinstance(callback.message, Message):
+        await callback.message.answer("Please send your name.")
 
 
 @pytest.mark.asyncio
@@ -90,4 +110,25 @@ async def test_flow() -> None:
 
     response = await tester.send_message("Bob")
     response.assert_contains("Nice to meet you, Bob!")
+
+    update = Update(
+        update_id=100,
+        message=Message(
+            message_id=100,
+            date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            chat=Chat(id=1, type="private"),
+            from_user=User(id=1, is_bot=False, first_name="Bob"),
+            photo=[PhotoSize(file_id="photo", file_unique_id="unique", width=64, height=64)],
+        ),
+    )
+    (response,) = await tester.feed_update(update)
+    response.assert_contains("Photo received.")
 ```
+
+## Custom updates and API calls
+
+Pass an aiogram `Update` to `await tester.feed_update(update)` to test photo messages, inline queries, and other events handled by your dispatcher. The method returns a tuple of captured messages and edits in order. It returns an empty tuple when the handler produces no captured message.
+
+Use `tester.api_calls` to inspect outgoing aiogram methods in call order. For example, after handling an inline query, check that the bot called `AnswerInlineQuery`.
+
+`SendMessage` returns an aiogram `Message` that can be edited with `edit_text()` and `edit_reply_markup()`. Sending text and editing a chat message both produce a `BotMessage` for assertions. `AnswerCallbackQuery` returns `True` and only appears in the call history. Other unsupported methods return mocks and can be asserted through the same history.
