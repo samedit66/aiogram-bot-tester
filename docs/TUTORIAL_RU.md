@@ -18,6 +18,8 @@
   - [Параметры тестового пользователя](#параметры-тестового-пользователя)
 - [Методы BotTester](#методы-bottester)
   - [send_message](#send_message)
+  - [Отправка медиа](#отправка-медиа)
+  - [send_album](#send_album)
   - [feed_update](#feed_update)
   - [send_command](#send_command)
   - [start](#start)
@@ -29,6 +31,7 @@
 - [Объект BotMessage](#объект-botmessage)
   - [Поля, buttons и is_empty](#поля-buttons-и-is_empty)
   - [Проверка текста](#проверка-текста)
+  - [Проверка медиа и подписей](#проверка-медиа-и-подписей)
   - [Проверка кнопок](#проверка-кнопок)
   - [Проверка клавиатуры](#проверка-клавиатуры)
 - [Исключения](#исключения)
@@ -299,11 +302,86 @@ async def test_greeting() -> None:
 dispatcher полностью обрабатывает update, затем библиотека выполняет
 `asyncio.sleep(timeout)`, и только после этого проверяет наличие ответа.
 
+### Отправка медиа
+
+Передайте метаданные именованными аргументами. Тестер создаст входящее
+сообщение для текущего чата и пользователя. Если опустить `file_id`, тестер
+сгенерирует его сам. Файлы имитируются через их метаданные.
+
+| Метод | Параметры медиа |
+| --- | --- |
+| `send_photo()` | `width=640`, `height=480` |
+| `send_document()` | `file_name=None`, `mime_type=None` |
+| `send_voice()` | `duration=1` в секундах, `mime_type=None` |
+| `send_video()` | `width=640`, `height=480`, `duration=1` в секундах |
+| `send_sticker()` | `emoji=None` для статического стикера |
+
+Все пять методов принимают `file_id` и `timeout`. Первые четыре также
+принимают `caption` и кортеж объектов `CaptionEntity` из
+`aiogram_bot_tester` в параметре `caption_entities`. Некорректные метаданные,
+например фото с нулевой шириной, вызывают `ValueError` до запуска хендлера.
+
+Предположим, что бот подтверждает получение каждого вложения текстом.
+
+```python
+@pytest.mark.asyncio
+async def test_uploads(tester) -> None:
+    response = await tester.send_photo(file_id="avatar", caption="Мой аватар")
+    response.assert_contains("Фото получено")
+
+    response = await tester.send_document(file_name="orders.csv", mime_type="text/csv")
+    response.assert_contains("Документ получен")
+
+    response = await tester.send_voice(duration=12, mime_type="audio/ogg")
+    response.assert_contains("Голосовое сообщение получено")
+
+    response = await tester.send_video(width=1280, height=720, duration=8)
+    response.assert_contains("Видео получено")
+
+    response = await tester.send_sticker(emoji="🙂")
+    response.assert_contains("Стикер получен")
+```
+
+Каждый метод возвращает последний захваченный ответ. Если бот промолчал,
+метод выбрасывает `NoBotResponseError`, как и `send_message()`.
+
+### send_album
+
+Для альбома из 2–10 вложений используйте `send_album()`. Импортируйте
+`Photo`, `Video` или `Document` из `aiogram_bot_tester`. Фото и видео можно
+смешивать в одном альбоме. Документы отправляются отдельным альбомом. При
+неверном количестве элементов или смешивании документов с другими вложениями
+метод выбрасывает `ValueError` до первого обновления.
+
+Предположим, что бот отвечает на каждый элемент по порядку.
+
+```python
+from aiogram_bot_tester import Photo, Video
+
+
+@pytest.mark.asyncio
+async def test_upload_album(tester) -> None:
+    photo_reply, video_reply = await tester.send_album(
+        [
+            Photo(file_id="cover", caption="Обложка"),
+            Video(file_id="walkthrough", duration=8),
+        ]
+    )
+
+    photo_reply.assert_contains("Фото получено")
+    video_reply.assert_contains("Видео получено")
+```
+
+Диспетчер получает отдельное обновление на каждый элемент. Поле
+`media_group_id` общее для всех входящих сообщений альбома. Метод возвращает
+все захваченные ответы в порядке появления или пустой кортеж, если бот
+промолчал. Ожидание `timeout` применяется один раз после последнего элемента.
+
 ### feed_update
 
 Передайте объект aiogram `Update` в `feed_update(update)`, чтобы отправить
-обновление напрямую в диспетчер. Так можно проверить получение фото,
-inline-запросы и другие события.
+обновление напрямую в диспетчер. Так можно задать все поля события,
+например отправить фото с несколькими размерами или inline-запрос.
 
 Метод возвращает кортеж захваченных сообщений и правок в порядке появления.
 Если обновление не вызвало ни одного такого ответа, метод возвращает пустой
@@ -536,7 +614,7 @@ async def test_greeting_chat() -> None:
 
 ## Объект BotMessage
 
-`BotMessage` — неизменяемый dataclass, представляющий захваченный `SendMessage`.
+`BotMessage` — неизменяемый dataclass, представляющий захваченный ответ или правку сообщения.
 Обычно его не создают вручную: он возвращается методами `BotTester`.
 
 ### Поля, buttons и is_empty
@@ -544,6 +622,9 @@ async def test_greeting_chat() -> None:
 Публичные поля:
 
 - `text: str | None` — текст ответа;
+- `caption: str | None` — подпись медиа;
+- `photo`, `document`, `voice`, `video`, `sticker` — захваченные вложения;
+- `media_group_id: str | None` — идентификатор захваченной группы медиа;
 - `keyboard: list[list[Button]]` — строки захваченной клавиатуры.
 
 Кнопки представлены типами:
@@ -553,8 +634,8 @@ async def test_greeting_chat() -> None:
 - `UrlButton(label, url)` — inline URL-кнопка.
 
 `message.buttons` — property, разворачивающий матрицу `keyboard` в плоский список.
-`message.is_empty()` возвращает `True`, если у сообщения нет непустого текста и
-клавиатуры.
+`message.is_empty()` возвращает `True`, если у сообщения нет текста, клавиатуры,
+подписи и медиа.
 
 ```python
 assert response.text == "Выберите действие"
@@ -602,6 +683,49 @@ response.refute_matches(r"failed", r"exception")
 
 ```python
 assert response.text == "Hello!"
+```
+
+### Проверка медиа и подписей
+
+Вызывайте эти методы на ответе, в котором бот отправил вложение.
+
+| Метод | Что проверяет |
+| --- | --- |
+| `assert_photo(file_id=None)` | Есть фото. Если указан ID, он может совпасть с любым из его размеров. |
+| `assert_document(file_id=None, file_name=None)` | Есть документ и все указанные поля совпадают точно. |
+| `assert_voice(file_id=None)` | Есть голосовое сообщение, а его ID совпадает, если он указан. |
+| `assert_video(file_id=None)` | Есть видео, а его ID совпадает, если он указан. |
+| `assert_sticker(file_id=None, emoji=None)` | Есть стикер и все указанные поля совпадают точно. |
+| `assert_caption(expected)` | Подпись совпадает целиком. Передайте `None`, чтобы проверить её отсутствие. |
+| `assert_caption_contains(text, *texts)` | Подпись содержит хотя бы одну из переданных строк. |
+
+Фильтры по полям вложений передавайте именованными аргументами. При
+несовпадении методы выбрасывают `AssertionError`. Проверка недоступного поля
+тоже падает. Например, у тестера нет имени файла, если бот отправил документ
+только по ID. Проверки подписи используют `response.caption`.
+
+В этом примере на каждую команду бот отвечает вложением.
+
+```python
+@pytest.mark.asyncio
+async def test_media_replies(tester) -> None:
+    photo = await tester.send_command("avatar")
+    photo.assert_photo(file_id="saved-avatar")
+    photo.assert_caption("Аватар сохранён")
+    photo.assert_caption_contains("обновлён", "сохранён")
+
+    document = await tester.send_command("report")
+    document.assert_document(file_name="report.pdf")
+
+    voice = await tester.send_command("preview")
+    voice.assert_voice(file_id="voice-preview")
+    voice.assert_caption(None)
+
+    video = await tester.send_command("demo")
+    video.assert_video(file_id="video-demo")
+
+    sticker = await tester.send_command("thanks")
+    sticker.assert_sticker(emoji="🙂")
 ```
 
 ### Проверка кнопок

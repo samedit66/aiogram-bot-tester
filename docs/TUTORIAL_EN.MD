@@ -18,6 +18,8 @@ or contacting Telegram.
   - [Test User Parameters](#test-user-parameters)
 - [BotTester Methods](#bottester-methods)
   - [send_message](#send_message)
+  - [Sending media](#sending-media)
+  - [send_album](#send_album)
   - [feed_update](#feed_update)
   - [send_command](#send_command)
   - [start](#start)
@@ -29,6 +31,7 @@ or contacting Telegram.
 - [The BotMessage Object](#the-botmessage-object)
   - [Fields, buttons, and is_empty](#fields-buttons-and-is_empty)
   - [Checking Text](#checking-text)
+  - [Checking Media and Captions](#checking-media-and-captions)
   - [Checking Buttons](#checking-buttons)
   - [Checking the Keyboard](#checking-the-keyboard)
 - [Exceptions](#exceptions)
@@ -297,10 +300,85 @@ If the bot sends no response, `NoBotResponseError` is raised.
 dispatcher first finishes processing the update, then the library calls
 `asyncio.sleep(timeout)`, and only then checks for a response.
 
+### Sending media
+
+Pass media metadata as keyword arguments. The tester builds an incoming
+message for the current chat and user. When you omit `file_id`, it generates
+one for you. Files are simulated through their metadata.
+
+| Method | Media-specific parameters |
+| --- | --- |
+| `send_photo()` | `width=640`, `height=480` |
+| `send_document()` | `file_name=None`, `mime_type=None` |
+| `send_voice()` | `duration=1` in seconds, `mime_type=None` |
+| `send_video()` | `width=640`, `height=480`, `duration=1` in seconds |
+| `send_sticker()` | `emoji=None` for a static sticker |
+
+All five methods accept `file_id` and `timeout`. The first four also accept
+`caption` and a tuple of `CaptionEntity` objects from `aiogram_bot_tester` as
+`caption_entities`. Invalid metadata, such as a photo with zero width, raises
+`ValueError` before the handler runs.
+
+Suppose your bot acknowledges each attachment with a text message:
+
+```python
+@pytest.mark.asyncio
+async def test_uploads(tester) -> None:
+    response = await tester.send_photo(file_id="avatar", caption="My avatar")
+    response.assert_contains("Photo received")
+
+    response = await tester.send_document(file_name="orders.csv", mime_type="text/csv")
+    response.assert_contains("Document received")
+
+    response = await tester.send_voice(duration=12, mime_type="audio/ogg")
+    response.assert_contains("Voice message received")
+
+    response = await tester.send_video(width=1280, height=720, duration=8)
+    response.assert_contains("Video received")
+
+    response = await tester.send_sticker(emoji="🙂")
+    response.assert_contains("Sticker received")
+```
+
+Each method returns the last captured reply. If your bot stays silent, it
+raises `NoBotResponseError`, just like `send_message()`.
+
+### send_album
+
+Use `send_album()` for 2–10 attachments. Import `Photo`, `Video`, or
+`Document` from `aiogram_bot_tester`. Photos and videos can share an album.
+Documents form their own album. Invalid size or a mix of documents and other
+attachments raises `ValueError` before the first update.
+
+Suppose the bot acknowledges each item in order:
+
+```python
+from aiogram_bot_tester import Photo, Video
+
+
+@pytest.mark.asyncio
+async def test_upload_album(tester) -> None:
+    photo_reply, video_reply = await tester.send_album(
+        [
+            Photo(file_id="cover", caption="Cover"),
+            Video(file_id="walkthrough", duration=8),
+        ]
+    )
+
+    photo_reply.assert_contains("Photo received")
+    video_reply.assert_contains("Video received")
+```
+
+The dispatcher receives a separate update per item, with a common
+`media_group_id` on all the incoming messages. The method returns all captured
+replies in order, or an empty tuple if the bot stays silent. It applies
+`timeout` once after dispatching the last item.
+
 ### feed_update
 
 Use `feed_update(update)` to pass an aiogram `Update` directly to the
-dispatcher. This lets you test events such as incoming photos or inline queries.
+dispatcher. Use this for fully specified events, such as a photo with multiple sizes or
+an inline query.
 
 The result is a tuple of captured messages and edits in order. An update that
 produces no captured message returns an empty tuple. Use `tester.api_calls` to
@@ -531,7 +609,7 @@ Exceptions:
 
 ## The BotMessage Object
 
-`BotMessage` is an immutable dataclass representing a captured `SendMessage`.
+`BotMessage` is an immutable dataclass representing a captured bot reply or message edit.
 You normally do not construct it yourself; `BotTester` methods return it.
 
 ### Fields, buttons, and is_empty
@@ -539,6 +617,9 @@ You normally do not construct it yourself; `BotTester` methods return it.
 Public fields:
 
 - `text: str | None` — response text;
+- `caption: str | None` — media caption;
+- `photo`, `document`, `voice`, `video`, `sticker` — captured attachments;
+- `media_group_id: str | None` — identifier of the captured media group;
 - `keyboard: list[list[Button]]` — rows of the captured keyboard.
 
 Buttons are represented by:
@@ -548,8 +629,8 @@ Buttons are represented by:
 - `UrlButton(label, url)` — inline URL button.
 
 `message.buttons` is a property that flattens `keyboard` into a single list.
-`message.is_empty()` returns `True` when the message has neither non-empty text
-nor a keyboard.
+`message.is_empty()` returns `True` when the message has no text, keyboard,
+caption, or media.
 
 ```python
 assert response.text == "Choose an action"
@@ -597,6 +678,49 @@ For exact comparison, use the `text` field:
 
 ```python
 assert response.text == "Hello!"
+```
+
+### Checking Media and Captions
+
+Call these methods on the response that contains the attachment.
+
+| Method | What it checks |
+| --- | --- |
+| `assert_photo(file_id=None)` | A photo exists. A supplied ID can match any of its sizes. |
+| `assert_document(file_id=None, file_name=None)` | A document exists and each supplied field matches exactly. |
+| `assert_voice(file_id=None)` | A voice message exists and its ID matches if supplied. |
+| `assert_video(file_id=None)` | A video exists and its ID matches if supplied. |
+| `assert_sticker(file_id=None, emoji=None)` | A sticker exists and each supplied field matches exactly. |
+| `assert_caption(expected)` | The full caption matches. Pass `None` to check for no caption. |
+| `assert_caption_contains(text, *texts)` | The caption contains at least one of the strings. |
+
+Pass attachment filters by keyword. All these assertions raise
+`AssertionError` on a mismatch. A filter for unavailable metadata also fails.
+For example, when a bot sends a document by file ID alone, the tester has no
+file name to check. Caption checks read `response.caption`.
+
+In this example, each command makes the bot send an attachment:
+
+```python
+@pytest.mark.asyncio
+async def test_media_replies(tester) -> None:
+    photo = await tester.send_command("avatar")
+    photo.assert_photo(file_id="saved-avatar")
+    photo.assert_caption("Avatar saved")
+    photo.assert_caption_contains("updated", "saved")
+
+    document = await tester.send_command("report")
+    document.assert_document(file_name="report.pdf")
+
+    voice = await tester.send_command("preview")
+    voice.assert_voice(file_id="voice-preview")
+    voice.assert_caption(None)
+
+    video = await tester.send_command("demo")
+    video.assert_video(file_id="video-demo")
+
+    sticker = await tester.send_command("thanks")
+    sticker.assert_sticker(emoji="🙂")
 ```
 
 ### Checking Buttons
