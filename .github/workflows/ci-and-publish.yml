@@ -1,0 +1,110 @@
+name: CI and publish
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.11.24"
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+      - run: uv run --locked ruff check .
+      - run: uv run --locked ruff format --check .
+      - run: uv run --locked mypy
+
+  tests:
+    name: Python ${{ matrix.python }} / ${{ matrix.os }} / aiogram ${{ matrix.aiogram }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
+        aiogram: [locked]
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+            aiogram: latest-compatible
+          - os: ubuntu-latest
+            python: "3.14"
+            aiogram: latest-compatible
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ matrix.python == '3.15' && '0.13.9' || env.UV_VERSION }}
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - if: matrix.aiogram == 'latest-compatible'
+        run: uv pip install --upgrade "aiogram>=3.28.2,<4"
+      - run: uv run --no-sync python -c "import aiogram; print(aiogram.__version__)"
+      - run: uv run --no-sync pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.14"
+      - name: Verify release tag and package version
+        if: github.ref_type == 'tag'
+        run: |
+          uv run --no-project python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag) or tag != f"v{version}":
+              raise SystemExit(f"Expected release tag v{version} in vMAJOR.MINOR.PATCH format, got {tag!r}")
+          PY
+      - run: uv build --no-sources
+      - name: Validate distribution metadata
+        run: uvx twine check --strict dist/*
+      - name: Smoke-test wheel and source distribution
+        run: |
+          for distribution in dist/*.whl dist/*.tar.gz; do
+            uv run --isolated --no-project --with "$distribution" python -c 'from importlib.resources import files; from aiogram import Router; from aiogram_bot_tester import BotTester; BotTester.from_routers(Router()); assert files("aiogram_bot_tester").joinpath("py.typed").is_file()'
+          done
+        shell: bash
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [quality, tests, build]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+      - run: uv publish --trusted-publishing always dist/*

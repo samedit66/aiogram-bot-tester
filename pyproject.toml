@@ -1,10 +1,11 @@
 [project]
 name = "aiogram_bot_tester"
-version = "2.2.0"
+version = "2.2.1"
 description = "Your missing test toolkit for Telegram bots."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "samedit66", email = "samedit66@yandex.ru" },
 ]
@@ -12,27 +13,39 @@ keywords = ["aiogram", "telegram", "testing", "pytest", "bot"]
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Testing",
     "Framework :: Pytest",
     "Typing :: Typed",
 ]
 dependencies = [
-    "aiogram>=3.28.2",
-    "pytest-asyncio>=1.3.0",
+    "aiogram>=3.28.2,<4",
 ]
 
 [project.urls]
 Homepage = "https://github.com/samedit66/aiogram-bot-tester"
+Documentation = "https://github.com/samedit66/aiogram-bot-tester#readme"
 Repository = "https://github.com/samedit66/aiogram-bot-tester"
 Issues = "https://github.com/samedit66/aiogram-bot-tester/issues"
 Changelog = "https://github.com/samedit66/aiogram-bot-tester/releases"
 
 [dependency-groups]
 dev = [
+    "mypy>=1.18.2",
     "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
     "ruff>=0.15.13",
 ]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+strict = true
 
 [build-system]
 requires = ["uv_build>=0.11.14,<0.12"]
