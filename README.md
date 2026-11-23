@@ -1,6 +1,4 @@
-# aiogram_bot_tester
-
-> Your missing test toolkit for Telegram bots.
+# aiogram-bot-tester
 
 [![CI](https://github.com/samedit66/aiogram-bot-tester/actions/workflows/ci-and-publish.yml/badge.svg?branch=main)](https://github.com/samedit66/aiogram-bot-tester/actions/workflows/ci-and-publish.yml)
 [![PyPI version](https://img.shields.io/pypi/v/aiogram-bot-tester?logo=pypi)](https://pypi.org/project/aiogram-bot-tester/)
@@ -9,126 +7,176 @@
 [![Apache 2.0 license](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/samedit66/aiogram-bot-tester/blob/main/LICENSE)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/aiogram-bot-tester?period=total&units=INTERNATIONAL_SYSTEM&left_color=GRAY&right_color=BLUE&left_text=downloads)](https://pepy.tech/projects/aiogram-bot-tester)
 
-> [!WARNING]
-> This library is under active development. Its API is unstable and may contain
-> frequent breaking changes between releases.
+Test aiogram conversations offline. Start the bot, tap a button by its label, and check the reply and the FSM after each step.
+
+```python
+import pytest
+
+from my_bot.signup import Signup
+
+pytestmark = pytest.mark.asyncio
+
+
+async def test_signup(tester):
+    welcome = await tester.start()
+    welcome.assert_contains("Welcome")
+    welcome.assert_button("Sign up")
+
+    prompt = await tester.tap_button("Sign up")
+    prompt.assert_contains("What's your name?")
+    await tester.assert_state(Signup.name)
+
+    reply = await tester.send_message("Bob")
+    reply.assert_contains("Nice to meet you, Bob!")
+    await tester.assert_state(Signup.confirm)
+    await tester.assert_data(name="Bob")
+```
+
+## What you get
+
+- **Actions that read like a chat.** Send a command, tap a reply or inline button by its visible text, or send a photo.
+- **A reply you can assert on immediately.** Check text, keyboard layout, media, and captions on the message returned by a step.
+- **FSM assertions at the point that matters.** Check transitions and stored data with `assert_state()` and `assert_data()`.
+- **Your real aiogram routing, offline.** Run your routers, filters, middleware, and injected dependencies through the dispatcher without a Telegram token or polling.
+
+## Try it with your bot
+
+Install the tester and the async pytest plugin.
+
+```sh
+uv add --dev aiogram-bot-tester pytest pytest-asyncio
+uv run pytest
+```
+
+With pip, install in your test environment.
+
+```sh
+python -m pip install aiogram-bot-tester pytest pytest-asyncio
+python -m pytest
+```
+
+Use your bot's existing router and state group in the examples. Put the fixture in `conftest.py` and the test snippets in a test module with the `pytestmark` from the first example.
+
+```python
+import pytest
+
+from aiogram_bot_tester import BotTester
+from my_bot.signup import router
+
+
+@pytest.fixture
+def tester():
+    return BotTester.from_routers(router)
+```
+
+The signup example expects your handlers to show a **Sign up** button on `/start`, prompt for a name when tapped, and store the name before moving to `Signup.confirm`. You can also pass an existing dispatcher to `BotTester.from_dispatcher(dispatcher)`.
+
+## Write tests that match the conversation
+
+### Check a reply on the spot
+
+Each `start()`, `send_message()`, `send_command()`, or `tap_button()` returns the last captured reply for that step. A missing reply raises `NoBotResponseError`.
+
+```python
+async def test_welcome_keyboard(tester):
+    welcome = await tester.send_command("start")
+    welcome.assert_matches(r"^Welcome")
+    welcome.assert_keyboard([["Sign up"]])
+```
+
+### Replay a transcript
+
+`chat()` replays a linear, text-only conversation and checks that each reply contains the expected text.
+
+```python
+async def test_welcome_transcript(tester):
+    await tester.chat(
+        """
+        User: /start
+        Bot: Welcome
+        """
+    )
+```
+
+### Send media and check the attachment
+
+Use `send_photo()`, `send_document()`, `send_voice()`, `send_video()`, or `send_sticker()` to send synthetic media metadata through the dispatcher. For a bot that echoes an uploaded avatar by its file ID:
+
+```python
+async def test_avatar(tester):
+    reply = await tester.send_photo(file_id="avatar", caption="My avatar")
+
+    reply.assert_photo(file_id="avatar")
+    reply.assert_caption("Avatar saved")
+    reply.assert_caption_contains("saved")
+```
+
+Use `assert_document()`, `assert_voice()`, `assert_video()`, and `assert_sticker()` for other attachments. The tester simulates metadata and keeps original outgoing URLs and upload objects in `tester.api_calls`.
+
+### Send an album
+
+An album contains 2–10 items with file IDs. Mix photos and videos, or send a group of documents. Each item reaches your handler as its own update with a shared `media_group_id`. The result contains all captured replies in order, including an empty tuple when the bot stays silent.
+
+```python
+from aiogram.types import InputMediaPhoto
+
+
+async def test_album(tester):
+    replies = await tester.send_album(
+        [InputMediaPhoto(media="front"), InputMediaPhoto(media="back")]
+    )
+
+    front, back = replies
+    front.assert_photo(file_id="front")
+    back.assert_photo(file_id="back")
+```
+
+### Feed a custom update
+
+Use `feed_update()` for events such as inline queries. It returns all captured messages and edits from the update. Inspect `api_calls` when the expected outcome is an API call, such as an answer to an inline query.
+
+```python
+from aiogram.methods import AnswerInlineQuery
+from aiogram.types import InlineQuery, Update, User
+
+
+async def test_inline_search(tester):
+    replies = await tester.feed_update(
+        Update(
+            update_id=100,
+            inline_query=InlineQuery(
+                id="search-1",
+                from_user=User(id=1, is_bot=False, first_name="Bob"),
+                query="cats",
+                offset="",
+            ),
+        )
+    )
+
+    assert replies == ()
+    assert any(
+        isinstance(call, AnswerInlineQuery) and call.inline_query_id == "search-1"
+        for call in tester.api_calls
+    )
+```
+
+## Why another testing library?
+
+Here is how each tool expresses the same check: send `/start` and verify that the bot replied with a welcome message.
+
+| Library | What you write | When it fits |
+| --- | --- | --- |
+| **aiogram-bot-tester** | `reply = await tester.start()`<br>`reply.assert_contains("Welcome")` | Follow one conversation step by step and assert directly on replies, buttons, and FSM transitions. |
+| [aiogram.test](https://docs.aiogram.dev/en/v3.33.0/dispatcher/testing.html) | `await bot_user.send("/start")`<br>`assert "Welcome" in bot_chat.messages[-1].text` | Model a stateful Telegram environment with multiple users, chats, rights, and an FSM context. |
+| [aiogram-testing](https://pypi.org/project/aiogram-testing/) | `calls = await tester.send_message("/start")`<br>`calls.assert_called(SendMessage, text="Welcome")` | Check typed Bot API calls, queue API failures, and read or set FSM state. Its `press()` also accepts a visible inline-button label. |
+| [aiogram-test-framework](https://github.com/sgavka/aiogram-test-framework#testuser) | `await user.send_command("start")`<br>`assert user.has_received_message_containing("Welcome")` | Work with simulated users, Telegram object factories, and a request capture log. |
+
+aiogram-bot-tester keeps the common workflow on one object. Create a tester from your router, take a user action, and check the returned reply. Add `await tester.assert_state(...)` and `await tester.assert_data(...)` beside the reply assertion when a step also changes the bot's state.
+
+## Learn more
 
 - [English tutorial](https://github.com/samedit66/aiogram-bot-tester/blob/main/docs/TUTORIAL_EN.MD)
 - [Русский туториал](https://github.com/samedit66/aiogram-bot-tester/blob/main/docs/TUTORIAL_RU.md)
 
-## Installation
-
-Stable version:
-
-```bash
-pip install aiogram_bot_tester
-```
-
-Latest development version:
-
-```bash
-pip install git+https://github.com/samedit66/aiogram-bot-tester.git
-```
-
-## What's that?
-
-`aiogram_bot_tester` is a lightweight way to test aiogram bots offline, without real Telegram API calls. It helps you simulate updates, check bot responses, and keep tests deterministic, so bot logic can be covered with confidence even when the conversation flow is complex.
-
-## Features
-
-- **Fully offline testing** — run bot scenarios without a Telegram token, network requests, or real API calls.
-- **Real aiogram pipeline** — updates pass through the actual dispatcher, routers, filters, middleware, and FSM machinery.
-- **Conversation-first API** — send messages and commands, start the bot, and tap reply or callback buttons by their visible labels.
-- **Readable assertions** — check message text, regular expressions, buttons, callback data, URLs, and complete keyboard layouts.
-- **FSM support** — assert the current state and inspect FSM data across multi-step conversation flows.
-- **Flexible test setup** — build a tester from reusable routers or an existing dispatcher, pass fake dependencies directly, and attach middleware when needed.
-
-## Quick example
-
-Install `pytest` and `pytest-asyncio` in your test environment to run this example.
-
-```python
-from datetime import datetime, timezone
-
-import pytest
-from aiogram import F, Router
-from aiogram.filters import CommandStart
-from aiogram.types import (
-    CallbackQuery,
-    Chat,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-    PhotoSize,
-    Update,
-    User,
-)
-
-from aiogram_bot_tester import BotTester
-
-router = Router()
-
-
-@router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    await message.answer(
-        "Hello! Press Continue or send me your name.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Continue", callback_data="continue")]
-            ]
-        ),
-    )
-
-
-@router.message(F.text)
-async def echo_name(message: Message) -> None:
-    await message.answer(f"Nice to meet you, {message.text}!")
-
-
-@router.message(F.photo)
-async def receive_photo(message: Message) -> None:
-    await message.answer("Photo received.")
-
-
-@router.callback_query(F.data == "continue")
-async def on_continue(callback: CallbackQuery) -> None:
-    if isinstance(callback.message, Message):
-        await callback.message.answer("Please send your name.")
-
-
-@pytest.mark.asyncio
-async def test_flow() -> None:
-    tester = BotTester.from_routers(router)
-
-    response = await tester.start()
-    response.assert_contains("Hello")
-    response.assert_button("Continue")
-
-    response = await tester.tap_button("Continue")
-    response.assert_contains("Please send your name.")
-
-    response = await tester.send_message("Bob")
-    response.assert_contains("Nice to meet you, Bob!")
-
-    update = Update(
-        update_id=100,
-        message=Message(
-            message_id=100,
-            date=datetime(2026, 1, 1, tzinfo=timezone.utc),
-            chat=Chat(id=1, type="private"),
-            from_user=User(id=1, is_bot=False, first_name="Bob"),
-            photo=[PhotoSize(file_id="photo", file_unique_id="unique", width=64, height=64)],
-        ),
-    )
-    (response,) = await tester.feed_update(update)
-    response.assert_contains("Photo received.")
-```
-
-## Custom updates and API calls
-
-Pass an aiogram `Update` to `await tester.feed_update(update)` to test photo messages, inline queries, and other events handled by your dispatcher. The method returns a tuple of captured messages and edits in order. It returns an empty tuple when the handler produces no captured message.
-
-Use `tester.api_calls` to inspect outgoing aiogram methods in call order. For example, after handling an inline query, check that the bot called `AnswerInlineQuery`.
-
-`SendMessage` returns an aiogram `Message` that can be edited with `edit_text()` and `edit_reply_markup()`. Sending text and editing a chat message both produce a `BotMessage` for assertions. `AnswerCallbackQuery` returns `True` and only appears in the call history. Other unsupported methods return mocks and can be asserted through the same history.
+> [!WARNING]
+> This library is under active development. Its API may change between releases.
