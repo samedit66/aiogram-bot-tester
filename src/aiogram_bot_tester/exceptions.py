@@ -31,6 +31,10 @@ class UrlButtonInteractionError(BotTesterError):
     """URL buttons cannot be tapped in tests."""
 
 
+class UnsupportedButtonInteractionError(BotTesterError):
+    """The inline button performs an action other than sending callback data."""
+
+
 class AmbiguousButtonError(BotTesterError):
     def __init__(
         self,

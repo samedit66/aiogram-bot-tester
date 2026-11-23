@@ -19,6 +19,11 @@ class UrlButton(Button):
 
 
 @dc.dataclass(frozen=True, slots=True)
+class UnsupportedInlineButton(Button):
+    pass
+
+
+@dc.dataclass(frozen=True, slots=True)
 class BotMessage:
     """A message which the bot sends back."""
 

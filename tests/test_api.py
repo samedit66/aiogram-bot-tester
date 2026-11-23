@@ -4,13 +4,25 @@ from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.filters.command import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.methods import (
+    AnswerCallbackQuery,
+    AnswerInlineQuery,
+    EditMessageReplyMarkup,
+    EditMessageText,
+    SendMessage,
+)
 from aiogram.types import (
     CallbackQuery,
+    Chat,
+    InlineQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
     Message,
+    PhotoSize,
     ReplyKeyboardMarkup,
+    Update,
+    User,
 )
 
 from aiogram_bot_tester.bot_tester import BotTester
@@ -19,6 +31,7 @@ from aiogram_bot_tester.exceptions import (
     InvalidTranscriptError,
     NoBotMessageError,
     NoBotResponseError,
+    UnsupportedButtonInteractionError,
 )
 
 
@@ -760,3 +773,151 @@ async def test_chat_bot_response_contains_expected():
         Bot: Welcome to our service
         """
     )
+
+
+@pytest.mark.asyncio
+async def test_callback_uses_sent_message_and_returns_latest_edit() -> None:
+    router = Router()
+    sent_id = None
+
+    @router.message()
+    async def show_menu(message: Message) -> None:
+        nonlocal sent_id
+        sent = await message.answer(
+            "Menu",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Edit", callback_data="edit")]
+                ]
+            ),
+        )
+        assert isinstance(sent, Message)
+        assert sent.from_user is not None
+        assert sent.from_user.is_bot
+        assert sent.from_user.id == 99
+        assert sent.chat.id == 15
+        sent_id = sent.message_id
+
+    @router.callback_query()
+    async def edit_menu(callback: CallbackQuery) -> None:
+        assert isinstance(callback.message, Message)
+        assert callback.message.message_id == sent_id
+        assert callback.message.reply_markup is not None
+        assert callback.from_user.first_name == "Alice"
+        assert await callback.answer() is True
+        edited = await callback.message.edit_text(
+            "Edited",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Old", callback_data="old")]
+                ]
+            ),
+        )
+        assert isinstance(edited, Message)
+        assert edited.message_id == sent_id
+        assert edited.text == "Edited"
+        updated = await edited.edit_reply_markup(reply_markup=None)
+        assert isinstance(updated, Message)
+        assert updated.message_id == sent_id
+        assert updated.reply_markup is None
+
+    tester = BotTester.from_routers(
+        router, token="99:TEST", chat_id=15, user_id=22, user_first_name="Alice"
+    )
+
+    (await tester.start()).assert_button("Edit")
+    response = await tester.tap_button("Edit")
+    response.assert_contains("Edited")
+    response.refute_button("Old")
+    assert [type(call) for call in tester.api_calls] == [
+        SendMessage,
+        AnswerCallbackQuery,
+        EditMessageText,
+        EditMessageReplyMarkup,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_callback_acknowledgment_is_not_a_bot_message() -> None:
+    router = Router()
+
+    @router.message()
+    async def show_menu(message: Message) -> None:
+        await message.answer(
+            "Menu",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="Confirm", callback_data="confirm"),
+                        InlineKeyboardButton(text="Search", switch_inline_query=""),
+                    ]
+                ]
+            ),
+        )
+
+    @router.callback_query()
+    async def acknowledge(callback: CallbackQuery) -> None:
+        assert await callback.answer() is True
+
+    tester = BotTester.from_routers(router)
+    menu = await tester.start()
+    menu.assert_button("Search")
+    with pytest.raises(UnsupportedButtonInteractionError):
+        await tester.tap_button("Search")
+    with pytest.raises(NoBotResponseError):
+        await tester.tap_button("Confirm")
+    # The acknowledgment leaves the original keyboard available.
+    with pytest.raises(NoBotResponseError):
+        await tester.tap_button("Confirm")
+    first, second = tester.api_calls[-2:]
+    assert isinstance(first, AnswerCallbackQuery)
+    assert isinstance(second, AnswerCallbackQuery)
+    assert first.callback_query_id != second.callback_query_id
+
+
+@pytest.mark.asyncio
+async def test_feed_update_dispatches_media_and_captures_webhook_response() -> None:
+    router = Router()
+
+    @router.message(F.photo)
+    async def handle_photo(message: Message) -> SendMessage:
+        await message.answer("Received")
+        return message.answer("Processed")
+
+    @router.inline_query()
+    async def handle_inline(query: InlineQuery) -> None:
+        await query.answer([])
+
+    tester = BotTester.from_routers(router)
+    user = User(id=10, is_bot=False, first_name="Alice")
+    photo = Message(
+        message_id=100,
+        date=0,
+        chat=Chat(id=-100123, type="supergroup", title="Test group"),
+        from_user=user,
+        photo=[
+            PhotoSize(file_id="photo", file_unique_id="unique", width=100, height=100)
+        ],
+    )
+
+    responses = await tester.feed_update(Update(update_id=100, message=photo))
+    assert tuple(response.text for response in responses) == ("Received", "Processed")
+    assert photo.bot is None
+    assert photo.photo is not None
+    assert photo.photo[0].bot is None
+    assert all(
+        isinstance(call, SendMessage) and call.chat_id == photo.chat.id
+        for call in tester.api_calls
+    )
+    assert (
+        await tester.feed_update(
+            Update(
+                update_id=101,
+                inline_query=InlineQuery(
+                    id="inline", from_user=user, query="", offset=""
+                ),
+            )
+        )
+        == ()
+    )
+    assert isinstance(tester.api_calls[-1], AnswerInlineQuery)
